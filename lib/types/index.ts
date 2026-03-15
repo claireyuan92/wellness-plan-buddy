@@ -60,6 +60,7 @@ export interface DailyLog {
   periodStarted: boolean;
   periodEnded: boolean;
   flowLevel: FlowLevel | null;
+  ovulationLogged?: boolean;
 }
 
 // Medication Types

@@ -1,157 +1,57 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, LayoutAnimation, UIManager, PanResponder } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  LayoutAnimation,
+  Modal,
+  PanResponder,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  UIManager,
+  View,
+} from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { ScreenContainer } from '@/components/screen-container';
+import DayLogPanel from '@/components/day-log-panel';
+import SettingsModal from '@/components/settings-modal';
 import { useColors } from '@/hooks/use-colors';
-import { usePlans, useAppStore, useDailyLogs, useMedications, useAppointments } from '@/lib/store/app-store';
+import { useAppStore, useAppointments, useDailyLogs, useMedications, usePlans } from '@/lib/store/app-store';
 import { DailyLog, generateId } from '@/lib/types';
 import { getDateFertilityInfoFromLogs } from '@/lib/utils/fertility';
-import * as Haptics from 'expo-haptics';
-import DayDetailSheet from '@/components/day-detail-sheet';
-import SettingsModal from '@/components/settings-modal';
 
+const DAY_IN_MS = 1000 * 60 * 60 * 24;
 const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-export default function CalendarScreen() {
-  const colors = useColors();
-  const { activePlan, setActivePlan } = usePlans();
-  const { state } = useAppStore();
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+type CalendarDay = {
+  date: string;
+  day: number;
+  isCurrentMonth: boolean;
+};
 
-  const planId = activePlan?.id || '';
-  const { logs, upsertDailyLog } = useDailyLogs(planId);
-  const { medications, upsertMedicationLog, getMedicationLog, addMedication, deleteMedication } = useMedications(planId);
-  const { appointments, getAppointmentsForDate, addAppointment, deleteAppointment } = useAppointments(planId);
-  const medicationLogsForPlan = useMemo(() => {
-    const medicationIds = new Set(medications.map((medication) => medication.id));
-    return state.medicationLogs.filter((log) => medicationIds.has(log.medicationId));
-  }, [medications, state.medicationLogs]);
-  useEffect(() => {
-    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-      UIManager.setLayoutAnimationEnabledExperimental(true);
-    }
-  }, []);
+function toDateKey(date: Date) {
+  return date.toISOString().split('T')[0];
+}
 
-  // Get calendar data for current month
-  const calendarData = useMemo(() => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startPadding = firstDay.getDay();
-    const totalDays = lastDay.getDate();
+function addDays(date: string, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return toDateKey(next);
+}
 
-    const days: { date: string; day: number; isCurrentMonth: boolean }[] = [];
+function getStartOfWeek(date: string) {
+  const next = new Date(date);
+  next.setDate(next.getDate() - next.getDay());
+  return toDateKey(next);
+}
 
-    // Previous month padding
-    const prevMonth = new Date(year, month, 0);
-    for (let i = startPadding - 1; i >= 0; i--) {
-      const day = prevMonth.getDate() - i;
-      const date = new Date(year, month - 1, day).toISOString().split('T')[0];
-      days.push({ date, day, isCurrentMonth: false });
-    }
-
-    // Current month days
-    for (let day = 1; day <= totalDays; day++) {
-      const date = new Date(year, month, day).toISOString().split('T')[0];
-      days.push({ date, day, isCurrentMonth: true });
-    }
-
-    // Next month padding
-    const remaining = 42 - days.length;
-    for (let day = 1; day <= remaining; day++) {
-      const date = new Date(year, month + 1, day).toISOString().split('T')[0];
-      days.push({ date, day, isCurrentMonth: false });
-    }
-
-    return days;
-  }, [currentDate]);
-
-  const getDayIndicators = useCallback((date: string) => {
-    const log = logs.find(l => l.date === date);
-    const dayAppointments = appointments.filter(a => a.startTime.split('T')[0] === date);
-    const dayMedLogs = medicationLogsForPlan.filter(ml => ml.date === date);
-    
-    const hasMigraine = log?.migraineOccurred;
-    const hasSymptoms = log && (log.mood || log.sleepQuality || log.stressLevel);
-    const hasMedsTaken = dayMedLogs.some(ml => ml.status === 'taken');
-    const hasMedsSkipped = dayMedLogs.some(ml => ml.status === 'skipped');
-    const hasAppointment = dayAppointments.length > 0;
-
-    // Fertility info
-    let fertilityInfo = null;
-    if (state.profile?.cycleTrackingEnabled) {
-      fertilityInfo = getDateFertilityInfoFromLogs(
-        date,
-        logs,
-        state.profile.averageCycleLength,
-        state.profile.periodLength
-      );
-    }
-
-    // Check if period was logged for this date
-    const isPeriodLogged = log?.periodStarted || (log?.flowLevel && !log?.periodEnded);
-
-    return {
-      hasMigraine,
-      hasSymptoms,
-      hasMedsTaken,
-      hasMedsSkipped,
-      hasAppointment,
-      fertilityInfo,
-      isPeriodLogged,
-    };
-  }, [appointments, logs, medicationLogsForPlan, state.profile]);
-
-  const handlePrevMonth = () => {
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
-  };
-
-  const handleNextMonth = () => {
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
-  };
-
-  const monthSwipeResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gestureState) =>
-          Math.abs(gestureState.dx) > 16 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
-        onPanResponderRelease: (_, gestureState) => {
-          if (gestureState.dx <= -40) {
-            handleNextMonth();
-            return;
-          }
-
-          if (gestureState.dx >= 40) {
-            handlePrevMonth();
-          }
-        },
-      }),
-    [handleNextMonth, handlePrevMonth]
-  );
-
-  const handleDayPress = (date: string) => {
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    setSelectedDate(date);
-  };
-
-  const isLoggedPeriodDay = useCallback((log?: DailyLog) => {
-    return !!(log?.periodStarted || log?.periodEnded || log?.flowLevel);
-  }, []);
-
-  const buildEmptyLog = useCallback((date: string): DailyLog => ({
+function buildEmptyLog(planId: string, date: string): DailyLog {
+  return {
     id: generateId(),
     planId,
     date,
@@ -165,7 +65,82 @@ export default function CalendarScreen() {
     periodStarted: false,
     periodEnded: false,
     flowLevel: null,
-  }), [planId]);
+    ovulationLogged: false,
+  };
+}
+
+function buildMonthDays(baseDate: Date): CalendarDay[] {
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startPadding = firstDay.getDay();
+  const totalDays = lastDay.getDate();
+  const days: CalendarDay[] = [];
+
+  const prevMonth = new Date(year, month, 0);
+  for (let i = startPadding - 1; i >= 0; i -= 1) {
+    const day = prevMonth.getDate() - i;
+    days.push({
+      date: toDateKey(new Date(year, month - 1, day)),
+      day,
+      isCurrentMonth: false,
+    });
+  }
+
+  for (let day = 1; day <= totalDays; day += 1) {
+    days.push({
+      date: toDateKey(new Date(year, month, day)),
+      day,
+      isCurrentMonth: true,
+    });
+  }
+
+  const remaining = 42 - days.length;
+  for (let day = 1; day <= remaining; day += 1) {
+    days.push({
+      date: toDateKey(new Date(year, month + 1, day)),
+      day,
+      isCurrentMonth: false,
+    });
+  }
+
+  return days;
+}
+
+export default function CalendarScreen() {
+  const colors = useColors();
+  const { state } = useAppStore();
+  const { activePlan, setActivePlan } = usePlans();
+  const [selectedDate, setSelectedDate] = useState(toDateKey(new Date()));
+  const [monthAnchor, setMonthAnchor] = useState(new Date());
+  const [showMonthModal, setShowMonthModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const transition = useRef(new Animated.Value(0)).current;
+
+  const planId = activePlan?.id ?? '';
+  const { logs, upsertDailyLog } = useDailyLogs(planId);
+  const { medications } = useMedications(planId);
+  const { appointments } = useAppointments(planId);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    setMonthAnchor(new Date(selectedDate));
+  }, [selectedDate]);
+
+  const medicationLogsForPlan = useMemo(() => {
+    const medicationIds = new Set(medications.map((medication) => medication.id));
+    return state.medicationLogs.filter((log) => medicationIds.has(log.medicationId));
+  }, [medications, state.medicationLogs]);
+
+  const isLoggedPeriodDay = useCallback((log?: DailyLog) => {
+    return !!(log?.periodStarted || log?.periodEnded || log?.flowLevel);
+  }, []);
 
   const syncPeriodDates = useCallback(async (periodDates: string[]) => {
     const sortedDates = [...new Set(periodDates)].sort();
@@ -177,14 +152,14 @@ export default function CalendarScreen() {
       const nextDate = sortedDates[index + 1];
       const hasPreviousAdjacent =
         !!previousDate &&
-        new Date(date).getTime() - new Date(previousDate).getTime() === 1000 * 60 * 60 * 24;
+        new Date(date).getTime() - new Date(previousDate).getTime() === DAY_IN_MS;
       const hasNextAdjacent =
         !!nextDate &&
-        new Date(nextDate).getTime() - new Date(date).getTime() === 1000 * 60 * 60 * 24;
+        new Date(nextDate).getTime() - new Date(date).getTime() === DAY_IN_MS;
       const existingLog = logsByDate.get(date);
 
       writes.push({
-        ...(existingLog ?? buildEmptyLog(date)),
+        ...(existingLog ?? buildEmptyLog(planId, date)),
         flowLevel: existingLog?.flowLevel ?? 'medium',
         periodStarted: !hasPreviousAdjacent,
         periodEnded: !hasNextAdjacent,
@@ -203,7 +178,7 @@ export default function CalendarScreen() {
     });
 
     await Promise.all(writes.map((log) => upsertDailyLog(log)));
-  }, [buildEmptyLog, isLoggedPeriodDay, logs, upsertDailyLog]);
+  }, [isLoggedPeriodDay, logs, planId, upsertDailyLog]);
 
   const togglePeriodDate = useCallback(async (date: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -211,15 +186,114 @@ export default function CalendarScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
-    const periodDates = logs
-      .filter((log) => isLoggedPeriodDay(log))
-      .map((log) => log.date);
+    const periodDates = logs.filter((log) => isLoggedPeriodDay(log)).map((log) => log.date);
     const nextDates = periodDates.includes(date)
       ? periodDates.filter((value) => value !== date)
       : [...periodDates, date];
 
     await syncPeriodDates(nextDates);
   }, [isLoggedPeriodDay, logs, syncPeriodDates]);
+
+  const getDayIndicators = useCallback((date: string) => {
+    const log = logs.find((item) => item.date === date);
+    const dayAppointments = appointments.filter((appointment) => appointment.startTime.split('T')[0] === date);
+    const dayMedLogs = medicationLogsForPlan.filter((item) => item.date === date);
+
+    const fertilityInfo = state.profile?.cycleTrackingEnabled
+      ? getDateFertilityInfoFromLogs(
+          date,
+          logs,
+          state.profile.averageCycleLength,
+          state.profile.periodLength
+        )
+      : null;
+
+    return {
+      hasMigraine: !!log?.migraineOccurred,
+      hasMedsTaken: dayMedLogs.some((item) => item.status === 'taken'),
+      hasAppointment: dayAppointments.length > 0,
+      isPeriodLogged: isLoggedPeriodDay(log),
+      isOvulationLogged: !!log?.ovulationLogged,
+      fertilityInfo,
+    };
+  }, [appointments, isLoggedPeriodDay, logs, medicationLogsForPlan, state.profile]);
+
+  const animateToDate = useCallback((nextDate: string) => {
+    if (nextDate === selectedDate) return;
+
+    const direction = new Date(nextDate).getTime() > new Date(selectedDate).getTime() ? 1 : -1;
+    Animated.timing(transition, {
+      toValue: direction,
+      duration: 170,
+      useNativeDriver: true,
+    }).start(() => {
+      setSelectedDate(nextDate);
+      transition.setValue(-direction * 0.65);
+      Animated.spring(transition, {
+        toValue: 0,
+        damping: 18,
+        mass: 0.9,
+        stiffness: 180,
+        useNativeDriver: true,
+      }).start();
+    });
+  }, [selectedDate, transition]);
+
+  const swipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx <= -45) {
+            animateToDate(addDays(selectedDate, 1));
+          } else if (gestureState.dx >= 45) {
+            animateToDate(addDays(selectedDate, -1));
+          }
+        },
+      }),
+    [animateToDate, selectedDate]
+  );
+
+  const weekDays = useMemo(() => {
+    const weekStart = getStartOfWeek(selectedDate);
+    return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
+  }, [selectedDate]);
+
+  const monthSections = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const monthDate = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + index - 2, 1);
+      return {
+        key: `${monthDate.getFullYear()}-${monthDate.getMonth()}`,
+        label: `${MONTHS[monthDate.getMonth()]} ${monthDate.getFullYear()}`,
+        days: buildMonthDays(monthDate),
+      };
+    });
+  }, [monthAnchor]);
+
+  const dayPanelStyle = useMemo(
+    () => ({
+      opacity: transition.interpolate({
+        inputRange: [-1, -0.3, 0, 0.3, 1],
+        outputRange: [0.2, 0.86, 1, 0.86, 0.2],
+      }),
+      transform: [
+        {
+          translateX: transition.interpolate({
+            inputRange: [-1, 0, 1],
+            outputRange: [-46, 0, 46],
+          }),
+        },
+        {
+          scale: transition.interpolate({
+            inputRange: [-1, 0, 1],
+            outputRange: [0.98, 1, 0.98],
+          }),
+        },
+      ],
+    }),
+    [transition]
+  );
 
   const handleBackToPlans = async () => {
     if (Platform.OS !== 'web') {
@@ -229,23 +303,18 @@ export default function CalendarScreen() {
     router.replace('/plans');
   };
 
-  const todayString = new Date().toISOString().split('T')[0];
-
   if (!activePlan) {
     return (
-      <LinearGradient
-        colors={[colors.gradientStart, colors.gradientEnd]}
-        style={styles.gradient}
-      >
+      <LinearGradient colors={[colors.gradientStart, colors.gradientEnd]} style={styles.gradient}>
         <ScreenContainer className="flex-1 items-center justify-center px-6">
           <Text className="text-2xl font-bold text-foreground mb-2">No active plan</Text>
           <Text className="text-sm text-muted text-center mb-6">
-            Select or create a treatment plan before logging symptoms, medications, and appointments.
+            Select or create a treatment plan before logging symptoms, medications, and cycle days.
           </Text>
           <TouchableOpacity
             onPress={() => router.replace('/plans')}
             style={[styles.emptyStateButton, { backgroundColor: colors.primary }]}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
           >
             <Text style={styles.emptyStateButtonText}>Go to Plans</Text>
           </TouchableOpacity>
@@ -255,199 +324,190 @@ export default function CalendarScreen() {
   }
 
   return (
-    <LinearGradient
-      colors={[colors.gradientStart, colors.gradientEnd]}
-      style={styles.gradient}
-    >
+    <LinearGradient colors={[colors.gradientStart, colors.gradientEnd]} style={styles.gradient}>
       <ScreenContainer className="flex-1" edges={['top', 'left', 'right']}>
-        {/* Header */}
-        <View className="flex-row justify-between items-center px-4 py-3">
+        <View style={styles.header}>
           <TouchableOpacity onPress={handleBackToPlans} style={styles.headerButton}>
             <Text style={[styles.headerButtonText, { color: colors.primary }]}>← Plans</Text>
           </TouchableOpacity>
-          <Text className="text-lg font-semibold text-foreground" numberOfLines={1}>
-            {activePlan.name}
-          </Text>
-          <TouchableOpacity 
-            onPress={() => {
-              if (Platform.OS !== 'web') {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }
-              setShowSettings(true);
-            }} 
-            style={styles.headerButton}
-          >
-            <Text style={styles.settingsIcon}>⚙️</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Month Navigation */}
-        <View className="items-center px-6 py-4">
-          <Text className="text-xl font-bold text-foreground">
-            {MONTHS[currentDate.getMonth()]} {currentDate.getFullYear()}
-          </Text>
-          <Text className="text-xs text-muted mt-1">Swipe left or right to change month</Text>
-        </View>
-
-        {/* Calendar Legend */}
-        {state.profile?.cycleTrackingEnabled && (
-          <View className="flex-row justify-between items-center px-4 pb-2">
-            <View className="flex-row gap-4">
-              <View className="flex-row items-center">
-                <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
-                <Text className="text-xs text-muted ml-1">Period</Text>
-              </View>
-              <View className="flex-row items-center">
-                <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
-                <Text className="text-xs text-muted ml-1">Ovulation</Text>
-              </View>
-              <View className="flex-row items-center">
-                <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
-                <Text className="text-xs text-muted ml-1">Fertile</Text>
-              </View>
-            </View>
-            <Text className="text-xs text-muted">Long press to mark period</Text>
+          <View style={styles.headerCenter}>
+            <Text style={[styles.planTitle, { color: colors.foreground }]} numberOfLines={1}>
+              {activePlan.name}
+            </Text>
+            <Text style={[styles.planSubtitle, { color: colors.muted }]}>Day View</Text>
           </View>
-        )}
-
-        {/* Day Headers */}
-        <View className="flex-row px-2">
-          {DAYS_OF_WEEK.map((day) => (
-            <View key={day} style={styles.dayHeader}>
-              <Text className="text-xs font-medium text-muted text-center">{day}</Text>
-            </View>
-          ))}
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={() => setShowMonthModal(true)}
+              style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.iconText}>📅</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setShowSettings(true)}
+              style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.iconText}>⚙️</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Calendar Grid */}
-        <View className="flex-row flex-wrap px-2" {...monthSwipeResponder.panHandlers}>
-          {calendarData.map((item, index) => {
-            const indicators = getDayIndicators(item.date);
-            const isToday = item.date === todayString;
-            const isSelected = item.date === selectedDate;
+        <View style={styles.weekStrip}>
+          {weekDays.map((date) => {
+            const indicators = getDayIndicators(date);
+            const isSelected = date === selectedDate;
+            const isToday = date === toDateKey(new Date());
+            const dayDate = new Date(date);
+            let backgroundColor = colors.surface;
 
-            // Determine background color based on fertility/period
-            let bgColor = 'transparent';
-            if (item.isCurrentMonth) {
-              if (indicators.isPeriodLogged) {
-                bgColor = colors.period;
-              } else if (indicators.fertilityInfo?.isPeriodDay) {
-                bgColor = `${colors.period}40`;
-              } else if (indicators.fertilityInfo?.isFertileDay) {
-                bgColor = `${colors.fertility}40`;
-              }
+            if (indicators.isPeriodLogged) {
+              backgroundColor = colors.period;
+            } else if (indicators.isOvulationLogged || indicators.fertilityInfo?.isOvulationDay) {
+              backgroundColor = `${colors.ovulation}55`;
+            } else if (indicators.fertilityInfo?.isFertileDay) {
+              backgroundColor = `${colors.fertility}55`;
             }
 
             return (
               <TouchableOpacity
-                key={`${item.date}-${index}`}
-                onPress={() => {
-                  if (!item.isCurrentMonth) return;
-                  handleDayPress(item.date);
-                }}
-                onLongPress={() => {
-                  if (!item.isCurrentMonth || !state.profile?.cycleTrackingEnabled) return;
-                  void togglePeriodDate(item.date);
-                }}
+                key={date}
+                onPress={() => animateToDate(date)}
                 style={[
-                  styles.dayCell,
-                  { backgroundColor: bgColor },
-                  isToday && { borderColor: colors.primary, borderWidth: 2 },
-                  isSelected && { backgroundColor: colors.primary },
+                  styles.weekDayButton,
+                  { backgroundColor, borderColor: isSelected || isToday ? colors.primary : colors.border },
+                  isSelected && { transform: [{ translateY: -2 }] },
                 ]}
-                activeOpacity={0.7}
-                disabled={!item.isCurrentMonth}
-                >
-                {item.isCurrentMonth && state.profile?.cycleTrackingEnabled && (
-                  <View
-                    style={[
-                      styles.periodCheckbox,
-                      {
-                        backgroundColor: indicators.isPeriodLogged ? colors.period : 'transparent',
-                        borderColor: indicators.isPeriodLogged ? colors.period : colors.muted,
-                      },
-                    ]}
-                  />
-                )}
-                <Text
-                  style={[
-                    styles.dayText,
-                    { color: item.isCurrentMonth ? colors.foreground : colors.muted },
-                    isSelected && { color: '#FFFFFF' },
-                    (indicators.isPeriodLogged || (indicators.fertilityInfo?.isPeriodDay && item.isCurrentMonth)) && { color: '#FFFFFF' },
-                  ]}
-                >
-                  {item.day}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.weekDayLabel, { color: isSelected ? colors.primary : colors.muted }]}>
+                  {DAYS_OF_WEEK[dayDate.getDay()]}
                 </Text>
-
-                {/* Ovulation indicator */}
-                {indicators.fertilityInfo?.isOvulationDay && item.isCurrentMonth && !isSelected && (
-                  <View style={[styles.ovulationRing, { borderColor: colors.ovulation }]} />
-                )}
-
-                {/* Indicator dots */}
-                {item.isCurrentMonth && (
-                  <View style={styles.indicatorRow}>
-                    {indicators.hasMigraine && (
-                      <View style={[styles.indicator, { backgroundColor: colors.migraine }]} />
-                    )}
-                    {indicators.hasSymptoms && !indicators.hasMigraine && (
-                      <View style={[styles.indicator, { backgroundColor: colors.success }]} />
-                    )}
-                    {indicators.hasMedsTaken && (
-                      <View style={[styles.indicator, { backgroundColor: colors.primary }]} />
-                    )}
-                    {indicators.hasAppointment && (
-                      <View style={[styles.indicator, { backgroundColor: colors.warning }]} />
-                    )}
-                  </View>
-                )}
+                <Text style={[styles.weekDayNumber, { color: colors.foreground }]}>{dayDate.getDate()}</Text>
+                <View style={styles.weekDots}>
+                  {indicators.hasMigraine && <View style={[styles.weekDot, { backgroundColor: colors.migraine }]} />}
+                  {indicators.hasMedsTaken && <View style={[styles.weekDot, { backgroundColor: colors.primary }]} />}
+                  {indicators.hasAppointment && <View style={[styles.weekDot, { backgroundColor: colors.warning }]} />}
+                </View>
               </TouchableOpacity>
             );
           })}
         </View>
 
-        {/* Quick Stats */}
-        <View className="flex-row justify-around px-4 py-4 mt-2">
-          <View className="items-center">
-            <Text className="text-2xl font-bold text-foreground">
-              {logs.filter(l => l.migraineOccurred).length}
-            </Text>
-            <Text className="text-xs text-muted">Migraines</Text>
-          </View>
-          <View className="items-center">
-            <Text className="text-2xl font-bold text-foreground">
-              {medicationLogsForPlan.filter(ml => ml.status === 'taken').length}
-            </Text>
-            <Text className="text-xs text-muted">Meds Taken</Text>
-          </View>
-          <View className="items-center">
-            <Text className="text-2xl font-bold text-foreground">
-              {appointments.length}
-            </Text>
-            <Text className="text-xs text-muted">Appointments</Text>
-          </View>
-        </View>
+        <Animated.View style={[styles.dayPanelShell, dayPanelStyle]} {...swipeResponder.panHandlers}>
+          <DayLogPanel
+            date={selectedDate}
+            planId={planId}
+            onTogglePeriodDay={togglePeriodDate}
+          />
+        </Animated.View>
 
-        {/* Day Detail Bottom Sheet */}
-        <DayDetailSheet
-          visible={!!selectedDate}
-          date={selectedDate || ''}
-          planId={planId}
-          onClose={() => setSelectedDate(null)}
-        />
+        <Modal
+          visible={showMonthModal}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowMonthModal(false)}
+        >
+          <Pressable style={styles.modalOverlay} onPress={() => setShowMonthModal(false)}>
+            <Pressable
+              style={[styles.monthSheet, { backgroundColor: colors.background }]}
+              onPress={(event) => event.stopPropagation()}
+            >
+              <View style={styles.monthSheetHeader}>
+                <Text style={[styles.monthSheetTitle, { color: colors.foreground }]}>Monthly Calendar</Text>
+                <TouchableOpacity onPress={() => setShowMonthModal(false)}>
+                  <Text style={[styles.closeText, { color: colors.primary }]}>Done</Text>
+                </TouchableOpacity>
+              </View>
 
-        {/* Settings Modal */}
-        <SettingsModal
-          visible={showSettings}
-          onClose={() => setShowSettings(false)}
-        />
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.monthScrollContent}>
+                <View style={styles.legendRow}>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
+                    <Text style={[styles.legendText, { color: colors.muted }]}>Period</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
+                    <Text style={[styles.legendText, { color: colors.muted }]}>Ovulation</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
+                    <Text style={[styles.legendText, { color: colors.muted }]}>Fertile</Text>
+                  </View>
+                </View>
+
+                {monthSections.map((section) => (
+                  <View key={section.key} style={styles.monthSection}>
+                    <Text style={[styles.monthLabel, { color: colors.foreground }]}>{section.label}</Text>
+                    <View style={styles.monthWeekHeader}>
+                      {DAYS_OF_WEEK.map((day) => (
+                        <Text key={`${section.key}-${day}`} style={[styles.monthWeekLabel, { color: colors.muted }]}>
+                          {day}
+                        </Text>
+                      ))}
+                    </View>
+                    <View style={styles.monthGrid}>
+                      {section.days.map((item) => {
+                        const indicators = getDayIndicators(item.date);
+                        const isSelected = item.date === selectedDate;
+                        let backgroundColor = 'transparent';
+
+                        if (item.isCurrentMonth) {
+                          if (indicators.isPeriodLogged) {
+                            backgroundColor = colors.period;
+                          } else if (indicators.isOvulationLogged || indicators.fertilityInfo?.isOvulationDay) {
+                            backgroundColor = `${colors.ovulation}44`;
+                          } else if (indicators.fertilityInfo?.isFertileDay) {
+                            backgroundColor = `${colors.fertility}40`;
+                          } else if (indicators.fertilityInfo?.isPeriodDay) {
+                            backgroundColor = `${colors.period}30`;
+                          }
+                        }
+
+                        return (
+                          <TouchableOpacity
+                            key={`${section.key}-${item.date}`}
+                            onPress={() => {
+                              if (!item.isCurrentMonth) return;
+                              animateToDate(item.date);
+                              setShowMonthModal(false);
+                            }}
+                            onLongPress={() => {
+                              if (!item.isCurrentMonth || !state.profile?.cycleTrackingEnabled) return;
+                              void togglePeriodDate(item.date);
+                            }}
+                            style={[
+                              styles.monthCell,
+                              { backgroundColor },
+                              isSelected && { borderColor: colors.primary, borderWidth: 2 },
+                            ]}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={[styles.monthCellText, { color: item.isCurrentMonth ? colors.foreground : colors.muted }]}>
+                              {item.day}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <SettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
       </ScreenContainer>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+  },
   emptyStateButton: {
     borderRadius: 999,
     minWidth: 160,
@@ -460,66 +520,171 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  gradient: {
-    flex: 1,
+  header: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 12,
   },
   headerButton: {
-    padding: 8,
-    minWidth: 60,
+    minWidth: 68,
+    paddingVertical: 8,
   },
   headerButtonText: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  settingsIcon: {
-    fontSize: 24,
+  headerCenter: {
+    flex: 1,
+  },
+  planTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  planSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  iconButton: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  iconText: {
+    fontSize: 18,
+  },
+  weekStrip: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  weekDayButton: {
+    alignItems: 'center',
+    borderRadius: 18,
+    borderWidth: 1.5,
+    flex: 1,
+    minHeight: 82,
+    paddingTop: 10,
+    paddingBottom: 8,
+    paddingHorizontal: 4,
+  },
+  weekDayLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  weekDayNumber: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  weekDots: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 8,
+    minHeight: 6,
+  },
+  weekDot: {
+    borderRadius: 3,
+    height: 6,
+    width: 6,
+  },
+  dayPanelShell: {
+    flex: 1,
+  },
+  modalOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.32)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  monthSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '86%',
+    minHeight: '72%',
+  },
+  monthSheetHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 12,
+  },
+  monthSheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  closeText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  monthScrollContent: {
+    paddingBottom: 40,
+    paddingHorizontal: 16,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    gap: 16,
+    paddingBottom: 10,
+  },
+  legendItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
   },
   legendDot: {
-    width: 10,
-    height: 10,
     borderRadius: 5,
+    height: 10,
+    width: 10,
   },
-  dayHeader: {
-    width: '14.28%',
-    paddingVertical: 8,
+  legendText: {
+    fontSize: 12,
   },
-  dayCell: {
-    width: '14.28%',
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    position: 'relative',
+  monthSection: {
+    marginTop: 12,
   },
-  periodCheckbox: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 1.5,
+  monthLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 10,
   },
-  dayText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  ovulationRing: {
-    position: 'absolute',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 2,
-  },
-  indicatorRow: {
+  monthWeekHeader: {
     flexDirection: 'row',
-    position: 'absolute',
-    bottom: 4,
-    gap: 2,
+    marginBottom: 8,
   },
-  indicator: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+  monthWeekLabel: {
+    fontSize: 11,
+    textAlign: 'center',
+    width: '14.28%',
+  },
+  monthGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  monthCell: {
+    alignItems: 'center',
+    borderRadius: 10,
+    height: 48,
+    justifyContent: 'center',
+    marginBottom: 4,
+    width: '14.28%',
+  },
+  monthCellText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
