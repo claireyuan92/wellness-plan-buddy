@@ -1,6 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { getDateFertilityInfo, findLastPeriodStart } from '../utils/fertility';
+import {
+  findLastPeriodStart,
+  findPeriodStartForDate,
+  getDateFertilityInfo,
+  getDateFertilityInfoFromLogs,
+  getUpcomingFertilityForecast,
+} from '../utils/fertility';
 import { DailyLog } from '../types';
+
+const buildLog = (overrides: Partial<DailyLog>): DailyLog => ({
+  id: overrides.id ?? 'log',
+  planId: overrides.planId ?? 'plan1',
+  date: overrides.date ?? '2026-01-01',
+  migraineOccurred: overrides.migraineOccurred ?? false,
+  migraineIntensity: overrides.migraineIntensity ?? 0,
+  symptoms: overrides.symptoms ?? [],
+  mood: overrides.mood ?? null,
+  sleepQuality: overrides.sleepQuality ?? null,
+  stressLevel: overrides.stressLevel ?? null,
+  notes: overrides.notes ?? '',
+  periodStarted: overrides.periodStarted ?? false,
+  periodEnded: overrides.periodEnded ?? false,
+  flowLevel: overrides.flowLevel ?? null,
+});
 
 describe('Fertility Utilities', () => {
   describe('getDateFertilityInfo', () => {
@@ -65,36 +87,8 @@ describe('Fertility Utilities', () => {
   describe('findLastPeriodStart', () => {
     it('should find the most recent period start', () => {
       const logs: DailyLog[] = [
-        {
-          id: '1',
-          planId: 'plan1',
-          date: '2026-01-01',
-          migraineOccurred: false,
-          migraineIntensity: 0,
-          symptoms: [],
-          mood: null,
-          sleepQuality: null,
-          stressLevel: null,
-          notes: '',
-          periodStarted: true,
-          periodEnded: false,
-          flowLevel: 'medium',
-        },
-        {
-          id: '2',
-          planId: 'plan1',
-          date: '2026-01-15',
-          migraineOccurred: false,
-          migraineIntensity: 0,
-          symptoms: [],
-          mood: null,
-          sleepQuality: null,
-          stressLevel: null,
-          notes: '',
-          periodStarted: true,
-          periodEnded: false,
-          flowLevel: 'light',
-        },
+        buildLog({ id: '1', date: '2026-01-01', periodStarted: true, flowLevel: 'medium' }),
+        buildLog({ id: '2', date: '2026-01-15', periodStarted: true, flowLevel: 'light' }),
       ];
       
       const result = findLastPeriodStart(logs);
@@ -102,23 +96,7 @@ describe('Fertility Utilities', () => {
     });
 
     it('should return null if no period starts found', () => {
-      const logs: DailyLog[] = [
-        {
-          id: '1',
-          planId: 'plan1',
-          date: '2026-01-01',
-          migraineOccurred: true,
-          migraineIntensity: 5,
-          symptoms: ['nausea'],
-          mood: 'okay',
-          sleepQuality: 6,
-          stressLevel: 4,
-          notes: '',
-          periodStarted: false,
-          periodEnded: false,
-          flowLevel: null,
-        },
-      ];
+      const logs: DailyLog[] = [buildLog({ migraineOccurred: true, migraineIntensity: 5, symptoms: ['nausea'], mood: 'okay', sleepQuality: 6, stressLevel: 4 })];
       
       const result = findLastPeriodStart(logs);
       expect(result).toBeNull();
@@ -127,6 +105,41 @@ describe('Fertility Utilities', () => {
     it('should return null for empty logs', () => {
       const result = findLastPeriodStart([]);
       expect(result).toBeNull();
+    });
+  });
+
+  describe('log-driven fertility calculations', () => {
+    const logs: DailyLog[] = [
+      buildLog({ id: '1', date: '2026-01-01', periodStarted: true, flowLevel: 'medium' }),
+      buildLog({ id: '2', date: '2026-01-29', periodStarted: true, flowLevel: 'light' }),
+    ];
+
+    it('should use the latest period start before the target date', () => {
+      expect(findPeriodStartForDate('2026-01-15', logs)).toBe('2026-01-01');
+      expect(findPeriodStartForDate('2026-02-02', logs)).toBe('2026-01-29');
+    });
+
+    it('should calculate fertility info from logs per date', () => {
+      const janCycle = getDateFertilityInfoFromLogs('2026-01-15', logs, 28, 5);
+      const febCycle = getDateFertilityInfoFromLogs('2026-02-12', logs, 28, 5);
+
+      expect(janCycle?.periodStart).toBe('2026-01-01');
+      expect(janCycle?.isOvulationDay).toBe(true);
+      expect(febCycle?.periodStart).toBe('2026-01-29');
+      expect(febCycle?.isOvulationDay).toBe(true);
+    });
+
+    it('should build an upcoming forecast from logged period starts', () => {
+      const forecast = getUpcomingFertilityForecast(logs, 28, 5, '2026-02-01');
+
+      expect(forecast).toMatchObject({
+        anchorPeriodStart: '2026-01-29',
+        nextPeriodStart: '2026-02-26',
+        nextPeriodEnd: '2026-03-02',
+        ovulationDate: '2026-02-12',
+        fertilityWindowStart: '2026-02-07',
+        fertilityWindowEnd: '2026-02-13',
+      });
     });
   });
 });

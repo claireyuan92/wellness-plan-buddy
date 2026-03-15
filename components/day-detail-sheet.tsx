@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, TextInput, Switch, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, TextInput, Switch, Platform, LayoutAnimation, UIManager } from 'react-native';
 import { useColors } from '@/hooks/use-colors';
 import { useAppStore, useDailyLogs, useMedications, useAppointments } from '@/lib/store/app-store';
 import { DailyLog, generateId, MIGRAINE_SYMPTOMS, MigraineSymptom, Mood, FlowLevel, Medication, Appointment } from '@/lib/types';
-import { getDateFertilityInfo, findLastPeriodStart } from '@/lib/utils/fertility';
+import { getDateFertilityInfoFromLogs, getUpcomingFertilityForecast } from '@/lib/utils/fertility';
 import * as Haptics from 'expo-haptics';
 import MedicationModal from './medication-modal';
 import AppointmentModal from './appointment-modal';
@@ -50,6 +50,12 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
   const [showMedicationModal, setShowMedicationModal] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
 
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
   // Local state for the form
   const [log, setLog] = useState<DailyLog>({
     id: '',
@@ -93,17 +99,24 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
     }
   }, [date, planId, getDailyLog]);
 
-  // Get fertility info
-  const lastPeriodStart = useMemo(() => findLastPeriodStart(logs), [logs]);
   const fertilityInfo = useMemo(() => {
-    if (!state.profile?.cycleTrackingEnabled || !lastPeriodStart || !date) return null;
-    return getDateFertilityInfo(
+    if (!state.profile?.cycleTrackingEnabled || !date) return null;
+    return getDateFertilityInfoFromLogs(
       date,
-      lastPeriodStart,
+      logs,
       state.profile.averageCycleLength,
       state.profile.periodLength
     );
-  }, [date, lastPeriodStart, state.profile]);
+  }, [date, logs, state.profile]);
+  const fertilityForecast = useMemo(() => {
+    if (!state.profile?.cycleTrackingEnabled || !date) return null;
+    return getUpcomingFertilityForecast(
+      logs,
+      state.profile.averageCycleLength,
+      state.profile.periodLength,
+      date
+    );
+  }, [date, logs, state.profile]);
 
   // Get medications and appointments for this date
   const dayMedications = medications;
@@ -120,6 +133,29 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
       setTimeout(() => upsertDailyLog(newLog), 300);
       return newLog;
     });
+  };
+
+  const handleCycleToggle = (field: 'periodStarted' | 'periodEnded', value: boolean) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+
+    if (field === 'periodStarted') {
+      handleFieldChange('periodStarted', value);
+      if (value) {
+        handleFieldChange('periodEnded', false);
+        if (!log.flowLevel) {
+          handleFieldChange('flowLevel', 'medium');
+        }
+      }
+      return;
+    }
+
+    handleFieldChange('periodEnded', value);
+    if (value) {
+      handleFieldChange('periodStarted', false);
+    }
   };
 
   const handleSymptomToggle = (symptom: MigraineSymptom) => {
@@ -154,6 +190,8 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
     const d = new Date(timeStr);
     return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   };
+  const formatShortDate = (value: string) =>
+    new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   if (!visible) return null;
 
@@ -355,15 +393,7 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
                   </View>
                   <Switch
                     value={log.periodStarted}
-                    onValueChange={(value) => {
-                      if (Platform.OS !== 'web') {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      }
-                      handleFieldChange('periodStarted', value);
-                      if (value) {
-                        handleFieldChange('periodEnded', false);
-                      }
-                    }}
+                    onValueChange={(value) => handleCycleToggle('periodStarted', value)}
                     trackColor={{ false: colors.border, true: colors.period }}
                     thumbColor="#FFFFFF"
                   />
@@ -377,15 +407,7 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
                   </View>
                   <Switch
                     value={log.periodEnded}
-                    onValueChange={(value) => {
-                      if (Platform.OS !== 'web') {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      }
-                      handleFieldChange('periodEnded', value);
-                      if (value) {
-                        handleFieldChange('periodStarted', false);
-                      }
-                    }}
+                    onValueChange={(value) => handleCycleToggle('periodEnded', value)}
                     trackColor={{ false: colors.border, true: colors.period }}
                     thumbColor="#FFFFFF"
                   />
@@ -428,20 +450,33 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
                 )}
 
                 {/* Fertility Info */}
-                {fertilityInfo && (
+                {(fertilityInfo || fertilityForecast) && (
                   <View style={[styles.fertilityInfo, { backgroundColor: colors.background, borderColor: colors.border }]}>
                     <Text className="text-sm font-medium text-foreground mb-1">
-                      Cycle Day {fertilityInfo.cycleDay}
+                      {fertilityInfo ? `Cycle Day ${fertilityInfo.cycleDay}` : 'Cycle forecast'}
                     </Text>
-                    {fertilityInfo.isOvulationDay && (
+                    {fertilityInfo?.isOvulationDay && (
                       <Text style={[styles.fertilityBadge, { backgroundColor: colors.ovulation }]}>
                         🥚 Predicted Ovulation Day
                       </Text>
                     )}
-                    {fertilityInfo.isFertileDay && !fertilityInfo.isOvulationDay && (
+                    {fertilityInfo?.isFertileDay && !fertilityInfo.isOvulationDay && (
                       <Text style={[styles.fertilityBadge, { backgroundColor: colors.fertility }]}>
                         ✨ High Fertility Window
                       </Text>
+                    )}
+                    {fertilityForecast && (
+                      <View className="mt-3 gap-2">
+                        <Text className="text-sm text-foreground">
+                          Period start: {formatShortDate(fertilityForecast.anchorPeriodStart)}
+                        </Text>
+                        <Text className="text-sm text-foreground">
+                          Predicted ovulation: {formatShortDate(fertilityForecast.ovulationDate)}
+                        </Text>
+                        <Text className="text-sm text-foreground">
+                          Fertility window: {formatShortDate(fertilityForecast.fertilityWindowStart)} - {formatShortDate(fertilityForecast.fertilityWindowEnd)}
+                        </Text>
+                      </View>
                     )}
                   </View>
                 )}

@@ -1,12 +1,12 @@
-import { useState, useMemo, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Platform } from 'react-native';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, LayoutAnimation, UIManager } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ScreenContainer } from '@/components/screen-container';
 import { useColors } from '@/hooks/use-colors';
 import { usePlans, useAppStore, useDailyLogs, useMedications, useAppointments } from '@/lib/store/app-store';
-import { DailyLog, generateId, MIGRAINE_SYMPTOMS, MigraineSymptom, Mood, FlowLevel, Medication, MedicationLog, Appointment } from '@/lib/types';
-import { getDateFertilityInfo, findLastPeriodStart } from '@/lib/utils/fertility';
+import { DailyLog, generateId } from '@/lib/types';
+import { getDateFertilityInfoFromLogs, getUpcomingFertilityForecast } from '@/lib/utils/fertility';
 import * as Haptics from 'expo-haptics';
 import DayDetailSheet from '@/components/day-detail-sheet';
 import SettingsModal from '@/components/settings-modal';
@@ -26,9 +26,26 @@ export default function CalendarScreen() {
   const { logs, upsertDailyLog, getDailyLog } = useDailyLogs(planId);
   const { medications, upsertMedicationLog, getMedicationLog, addMedication, deleteMedication } = useMedications(planId);
   const { appointments, getAppointmentsForDate, addAppointment, deleteAppointment } = useAppointments(planId);
+  const medicationLogsForPlan = useMemo(() => {
+    const medicationIds = new Set(medications.map((medication) => medication.id));
+    return state.medicationLogs.filter((log) => medicationIds.has(log.medicationId));
+  }, [medications, state.medicationLogs]);
+  const forecast = useMemo(() => {
+    if (!state.profile?.cycleTrackingEnabled) return null;
+    const today = new Date().toISOString().split('T')[0];
+    return getUpcomingFertilityForecast(
+      logs,
+      state.profile.averageCycleLength,
+      state.profile.periodLength,
+      today
+    );
+  }, [logs, state.profile]);
 
-  // Find last period start for fertility calculations
-  const lastPeriodStart = useMemo(() => findLastPeriodStart(logs), [logs]);
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
 
   // Get calendar data for current month
   const calendarData = useMemo(() => {
@@ -68,7 +85,7 @@ export default function CalendarScreen() {
   const getDayIndicators = useCallback((date: string) => {
     const log = logs.find(l => l.date === date);
     const dayAppointments = appointments.filter(a => a.startTime.split('T')[0] === date);
-    const dayMedLogs = state.medicationLogs.filter(ml => ml.date === date);
+    const dayMedLogs = medicationLogsForPlan.filter(ml => ml.date === date);
     
     const hasMigraine = log?.migraineOccurred;
     const hasSymptoms = log && (log.mood || log.sleepQuality || log.stressLevel);
@@ -78,10 +95,10 @@ export default function CalendarScreen() {
 
     // Fertility info
     let fertilityInfo = null;
-    if (state.profile?.cycleTrackingEnabled && lastPeriodStart) {
-      fertilityInfo = getDateFertilityInfo(
+    if (state.profile?.cycleTrackingEnabled) {
+      fertilityInfo = getDateFertilityInfoFromLogs(
         date,
-        lastPeriodStart,
+        logs,
         state.profile.averageCycleLength,
         state.profile.periodLength
       );
@@ -99,7 +116,7 @@ export default function CalendarScreen() {
       fertilityInfo,
       isPeriodLogged,
     };
-  }, [logs, appointments, state.medicationLogs, state.profile, lastPeriodStart]);
+  }, [appointments, logs, medicationLogsForPlan, state.profile]);
 
   const handlePrevMonth = () => {
     if (Platform.OS !== 'web') {
@@ -122,6 +139,41 @@ export default function CalendarScreen() {
     setSelectedDate(date);
   };
 
+  const handleMarkPeriodStart = useCallback(async (date: string) => {
+    if (!state.profile?.cycleTrackingEnabled) return;
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+
+    const existingLog = getDailyLog(planId, date);
+    const nextLog: DailyLog = existingLog
+      ? {
+          ...existingLog,
+          periodStarted: true,
+          periodEnded: false,
+          flowLevel: existingLog.flowLevel ?? 'medium',
+        }
+      : {
+          id: generateId(),
+          planId,
+          date,
+          migraineOccurred: false,
+          migraineIntensity: 5,
+          symptoms: [],
+          mood: null,
+          sleepQuality: null,
+          stressLevel: null,
+          notes: '',
+          periodStarted: true,
+          periodEnded: false,
+          flowLevel: 'medium',
+        };
+
+    await upsertDailyLog(nextLog);
+  }, [getDailyLog, planId, state.profile?.cycleTrackingEnabled, upsertDailyLog]);
+
   const handleBackToPlans = async () => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -131,12 +183,29 @@ export default function CalendarScreen() {
   };
 
   const todayString = new Date().toISOString().split('T')[0];
+  const formatMonthDay = (value: string) =>
+    new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   if (!activePlan) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text className="text-foreground">No active plan</Text>
-      </View>
+      <LinearGradient
+        colors={[colors.gradientStart, colors.gradientEnd]}
+        style={styles.gradient}
+      >
+        <ScreenContainer className="flex-1 items-center justify-center px-6">
+          <Text className="text-2xl font-bold text-foreground mb-2">No active plan</Text>
+          <Text className="text-sm text-muted text-center mb-6">
+            Select or create a treatment plan before logging symptoms, medications, and appointments.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.replace('/plans')}
+            style={[styles.emptyStateButton, { backgroundColor: colors.primary }]}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.emptyStateButtonText}>Go to Plans</Text>
+          </TouchableOpacity>
+        </ScreenContainer>
+      </LinearGradient>
     );
   }
 
@@ -182,20 +251,67 @@ export default function CalendarScreen() {
 
         {/* Calendar Legend */}
         {state.profile?.cycleTrackingEnabled && (
-          <View className="flex-row justify-center gap-4 px-4 pb-2">
-            <View className="flex-row items-center">
-              <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
-              <Text className="text-xs text-muted ml-1">Period</Text>
+          <>
+            <View className="flex-row justify-center gap-4 px-4 pb-2">
+              <View className="flex-row items-center">
+                <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
+                <Text className="text-xs text-muted ml-1">Period</Text>
+              </View>
+              <View className="flex-row items-center">
+                <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
+                <Text className="text-xs text-muted ml-1">Ovulation</Text>
+              </View>
+              <View className="flex-row items-center">
+                <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
+                <Text className="text-xs text-muted ml-1">Fertile</Text>
+              </View>
             </View>
-            <View className="flex-row items-center">
-              <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
-              <Text className="text-xs text-muted ml-1">Ovulation</Text>
+
+            <View style={[styles.forecastCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View className="flex-row justify-between items-start gap-3">
+                <View style={styles.forecastCopy}>
+                  <Text className="text-sm font-semibold text-foreground">Cycle forecast</Text>
+                  <Text className="text-xs text-muted mt-1">
+                    Long press a day in the calendar to mark a period start and refresh predictions.
+                  </Text>
+                </View>
+                {forecast && (
+                  <View style={[styles.anchorBadge, { backgroundColor: `${colors.period}20`, borderColor: colors.period }]}>
+                    <Text style={[styles.anchorBadgeText, { color: colors.period }]}>
+                      Start {formatMonthDay(forecast.anchorPeriodStart)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {forecast ? (
+                <View className="flex-row justify-between mt-4">
+                  <View className="items-center flex-1">
+                    <Text className="text-xs text-muted">Ovulation</Text>
+                    <Text className="text-base font-semibold text-foreground mt-1">
+                      {formatMonthDay(forecast.ovulationDate)}
+                    </Text>
+                  </View>
+                  <View className="items-center flex-1">
+                    <Text className="text-xs text-muted">Fertile Window</Text>
+                    <Text className="text-base font-semibold text-foreground mt-1 text-center">
+                      {formatMonthDay(forecast.fertilityWindowStart)} - {formatMonthDay(forecast.fertilityWindowEnd)}
+                    </Text>
+                  </View>
+                  <View className="items-center flex-1">
+                    <Text className="text-xs text-muted">Next Period</Text>
+                    <Text className="text-base font-semibold text-foreground mt-1">
+                      {formatMonthDay(forecast.nextPeriodStart)}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <Text className="text-sm text-muted mt-3">
+                  Add a period start day to begin ovulation and fertility predictions.
+                </Text>
+              )}
             </View>
-            <View className="flex-row items-center">
-              <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
-              <Text className="text-xs text-muted ml-1">Fertile</Text>
-            </View>
-          </View>
+          </>
         )}
 
         {/* Day Headers */}
@@ -230,6 +346,7 @@ export default function CalendarScreen() {
               <TouchableOpacity
                 key={`${item.date}-${index}`}
                 onPress={() => item.isCurrentMonth && handleDayPress(item.date)}
+                onLongPress={() => item.isCurrentMonth && handleMarkPeriodStart(item.date)}
                 style={[
                   styles.dayCell,
                   { backgroundColor: bgColor },
@@ -287,7 +404,7 @@ export default function CalendarScreen() {
           </View>
           <View className="items-center">
             <Text className="text-2xl font-bold text-foreground">
-              {state.medicationLogs.filter(ml => ml.status === 'taken').length}
+              {medicationLogsForPlan.filter(ml => ml.status === 'taken').length}
             </Text>
             <Text className="text-xs text-muted">Meds Taken</Text>
           </View>
@@ -318,13 +435,40 @@ export default function CalendarScreen() {
 }
 
 const styles = StyleSheet.create({
+  emptyStateButton: {
+    borderRadius: 999,
+    minWidth: 160,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  emptyStateButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   gradient: {
     flex: 1,
   },
-  container: {
+  forecastCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 16,
+  },
+  forecastCopy: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  },
+  anchorBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  anchorBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   headerButton: {
     padding: 8,

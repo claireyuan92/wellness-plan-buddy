@@ -1,5 +1,22 @@
 import { DailyLog } from '../types';
 
+const DAY_IN_MS = 1000 * 60 * 60 * 24;
+
+function toDateOnlyString(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+function addDays(dateString: string, days: number): string {
+  const date = new Date(dateString);
+  date.setDate(date.getDate() + days);
+  return toDateOnlyString(date);
+}
+
+export function getPeriodStartDates(logs: DailyLog[]): string[] {
+  return [...new Set(logs.filter((log) => log.periodStarted).map((log) => log.date))]
+    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+}
+
 // Calculate predicted period dates based on last period and cycle length
 export function getPredictedPeriodDates(
   lastPeriodStart: string,
@@ -18,8 +35,8 @@ export function getPredictedPeriodDates(
     periodEnd.setDate(periodEnd.getDate() + periodLength - 1);
 
     periods.push({
-      start: periodStart.toISOString().split('T')[0],
-      end: periodEnd.toISOString().split('T')[0],
+      start: toDateOnlyString(periodStart),
+      end: toDateOnlyString(periodEnd),
     });
   }
 
@@ -35,7 +52,7 @@ export function getPredictedOvulationDate(
   const ovulationDate = new Date(startDate);
   // Ovulation typically occurs 14 days before the next period
   ovulationDate.setDate(ovulationDate.getDate() + cycleLength - 14);
-  return ovulationDate.toISOString().split('T')[0];
+  return toDateOnlyString(ovulationDate);
 }
 
 // Calculate fertility window (5 days before ovulation + ovulation day)
@@ -53,19 +70,29 @@ export function getFertilityWindow(
   windowEnd.setDate(windowEnd.getDate() + 1);
 
   return {
-    start: windowStart.toISOString().split('T')[0],
-    end: windowEnd.toISOString().split('T')[0],
+    start: toDateOnlyString(windowStart),
+    end: toDateOnlyString(windowEnd),
     ovulation: ovulationDate,
   };
 }
 
 // Find the most recent period start from daily logs
 export function findLastPeriodStart(logs: DailyLog[]): string | null {
-  const periodLogs = logs
-    .filter((log) => log.periodStarted)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const periodLogs = getPeriodStartDates(logs);
 
-  return periodLogs.length > 0 ? periodLogs[0].date : null;
+  return periodLogs.length > 0 ? periodLogs[periodLogs.length - 1] : null;
+}
+
+export function findPeriodStartForDate(date: string, logs: DailyLog[]): string | null {
+  const periodStarts = getPeriodStartDates(logs);
+
+  for (let i = periodStarts.length - 1; i >= 0; i -= 1) {
+    if (periodStarts[i] <= date) {
+      return periodStarts[i];
+    }
+  }
+
+  return periodStarts[0] ?? null;
 }
 
 // Check if a date falls within a period
@@ -127,6 +154,7 @@ export interface DateFertilityInfo {
   isOvulationDay: boolean;
   isFertileDay: boolean;
   cycleDay: number;
+  periodStart: string;
 }
 
 export function getDateFertilityInfo(
@@ -144,5 +172,58 @@ export function getDateFertilityInfo(
     isOvulationDay: isOvulationDay(date, lastPeriodStart, cycleLength),
     isFertileDay: isInFertilityWindow(date, lastPeriodStart, cycleLength),
     cycleDay: getCycleDay(date, lastPeriodStart, cycleLength),
+    periodStart: lastPeriodStart,
+  };
+}
+
+export function getDateFertilityInfoFromLogs(
+  date: string,
+  logs: DailyLog[],
+  cycleLength: number,
+  periodLength: number
+): DateFertilityInfo | null {
+  const referencePeriodStart = findPeriodStartForDate(date, logs);
+  return getDateFertilityInfo(date, referencePeriodStart, cycleLength, periodLength);
+}
+
+export interface FertilityForecast {
+  anchorPeriodStart: string;
+  nextPeriodStart: string;
+  nextPeriodEnd: string;
+  ovulationDate: string;
+  fertilityWindowStart: string;
+  fertilityWindowEnd: string;
+}
+
+export function getUpcomingFertilityForecast(
+  logs: DailyLog[],
+  cycleLength: number,
+  periodLength: number,
+  fromDate: string
+): FertilityForecast | null {
+  const anchorPeriodStart = findPeriodStartForDate(fromDate, logs) ?? findLastPeriodStart(logs);
+  if (!anchorPeriodStart) {
+    return null;
+  }
+
+  const daysSinceAnchor = Math.floor(
+    (new Date(fromDate).getTime() - new Date(anchorPeriodStart).getTime()) / DAY_IN_MS
+  );
+  const cycleOffset = daysSinceAnchor >= 0 ? Math.floor(daysSinceAnchor / cycleLength) : 0;
+  const currentCycleStart = addDays(anchorPeriodStart, cycleOffset * cycleLength);
+  const nextPeriodStart =
+    currentCycleStart > fromDate ? currentCycleStart : addDays(currentCycleStart, cycleLength);
+  const nextPeriodEnd = addDays(nextPeriodStart, periodLength - 1);
+  const ovulationDate = addDays(nextPeriodStart, -14);
+  const fertilityWindowStart = addDays(ovulationDate, -5);
+  const fertilityWindowEnd = addDays(ovulationDate, 1);
+
+  return {
+    anchorPeriodStart,
+    nextPeriodStart,
+    nextPeriodEnd,
+    ovulationDate,
+    fertilityWindowStart,
+    fertilityWindowEnd,
   };
 }
