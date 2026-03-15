@@ -1,12 +1,12 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, LayoutAnimation, UIManager } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, LayoutAnimation, UIManager, PanResponder } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ScreenContainer } from '@/components/screen-container';
 import { useColors } from '@/hooks/use-colors';
 import { usePlans, useAppStore, useDailyLogs, useMedications, useAppointments } from '@/lib/store/app-store';
 import { DailyLog, generateId } from '@/lib/types';
-import { getDateFertilityInfoFromLogs, getUpcomingFertilityForecast } from '@/lib/utils/fertility';
+import { getDateFertilityInfoFromLogs } from '@/lib/utils/fertility';
 import * as Haptics from 'expo-haptics';
 import DayDetailSheet from '@/components/day-detail-sheet';
 import SettingsModal from '@/components/settings-modal';
@@ -24,24 +24,13 @@ export default function CalendarScreen() {
   const [isEditingPeriod, setIsEditingPeriod] = useState(false);
 
   const planId = activePlan?.id || '';
-  const { logs, upsertDailyLog, getDailyLog } = useDailyLogs(planId);
+  const { logs, upsertDailyLog } = useDailyLogs(planId);
   const { medications, upsertMedicationLog, getMedicationLog, addMedication, deleteMedication } = useMedications(planId);
   const { appointments, getAppointmentsForDate, addAppointment, deleteAppointment } = useAppointments(planId);
   const medicationLogsForPlan = useMemo(() => {
     const medicationIds = new Set(medications.map((medication) => medication.id));
     return state.medicationLogs.filter((log) => medicationIds.has(log.medicationId));
   }, [medications, state.medicationLogs]);
-  const forecast = useMemo(() => {
-    if (!state.profile?.cycleTrackingEnabled) return null;
-    const today = new Date().toISOString().split('T')[0];
-    return getUpcomingFertilityForecast(
-      logs,
-      state.profile.averageCycleLength,
-      state.profile.periodLength,
-      today
-    );
-  }, [logs, state.profile]);
-
   useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -133,6 +122,25 @@ export default function CalendarScreen() {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
   };
 
+  const monthSwipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dx) > 16 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx <= -40) {
+            handleNextMonth();
+            return;
+          }
+
+          if (gestureState.dx >= 40) {
+            handlePrevMonth();
+          }
+        },
+      }),
+    [handleNextMonth, handlePrevMonth]
+  );
+
   const handleDayPress = (date: string) => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -214,86 +222,6 @@ export default function CalendarScreen() {
     await syncPeriodDates(nextDates);
   }, [isLoggedPeriodDay, logs, syncPeriodDates]);
 
-  const upsertCycleFields = useCallback(async (date: string, fields: Partial<DailyLog>) => {
-    const existingLog = getDailyLog(planId, date);
-    const nextLog: DailyLog = existingLog
-      ? { ...existingLog, ...fields }
-      : {
-          id: generateId(),
-          planId,
-          date,
-          migraineOccurred: false,
-          migraineIntensity: 5,
-          symptoms: [],
-          mood: null,
-          sleepQuality: null,
-          stressLevel: null,
-          notes: '',
-          periodStarted: false,
-          periodEnded: false,
-          flowLevel: null,
-          ...fields,
-        };
-
-    await upsertDailyLog(nextLog);
-  }, [getDailyLog, planId, upsertDailyLog]);
-
-  const handleClearCycleData = useCallback(async () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    for (const log of logs) {
-      if (!log.periodStarted && !log.periodEnded && !log.flowLevel) continue;
-      await upsertDailyLog({
-        ...log,
-        periodStarted: false,
-        periodEnded: false,
-        flowLevel: null,
-      });
-    }
-  }, [logs, upsertDailyLog]);
-
-  const handleSeedCycleData = useCallback(async () => {
-    const offsetDate = (days: number) => {
-      const value = new Date();
-      value.setDate(value.getDate() + days);
-      return value.toISOString().split('T')[0];
-    };
-
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    await handleClearCycleData();
-    await upsertCycleFields(offsetDate(-42), {
-      periodStarted: true,
-      periodEnded: false,
-      flowLevel: 'medium',
-      notes: 'Debug seed: previous period start',
-    });
-    await upsertCycleFields(offsetDate(-41), {
-      periodStarted: false,
-      periodEnded: false,
-      flowLevel: 'heavy',
-    });
-    await upsertCycleFields(offsetDate(-38), {
-      periodStarted: false,
-      periodEnded: true,
-      flowLevel: 'light',
-    });
-    await upsertCycleFields(offsetDate(-14), {
-      periodStarted: true,
-      periodEnded: false,
-      flowLevel: 'medium',
-      notes: 'Debug seed: current period start',
-    });
-    await upsertCycleFields(offsetDate(-13), {
-      periodStarted: false,
-      periodEnded: false,
-      flowLevel: 'heavy',
-    });
-    await upsertCycleFields(offsetDate(-10), {
-      periodStarted: false,
-      periodEnded: true,
-      flowLevel: 'light',
-    });
-  }, [handleClearCycleData, upsertCycleFields]);
-
   const handleBackToPlans = async () => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -303,8 +231,6 @@ export default function CalendarScreen() {
   };
 
   const todayString = new Date().toISOString().split('T')[0];
-  const formatMonthDay = (value: string) =>
-    new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   if (!activePlan) {
     return (
@@ -357,129 +283,55 @@ export default function CalendarScreen() {
         </View>
 
         {/* Month Navigation */}
-        <View className="flex-row justify-between items-center px-6 py-4">
-          <TouchableOpacity
-            onPress={handlePrevMonth}
-            style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.navButtonText, { color: colors.foreground }]}>{'<'}</Text>
-          </TouchableOpacity>
+        <View className="items-center px-6 py-4">
           <Text className="text-xl font-bold text-foreground">
             {MONTHS[currentDate.getMonth()]} {currentDate.getFullYear()}
           </Text>
-          <TouchableOpacity
-            onPress={handleNextMonth}
-            style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.navButtonText, { color: colors.foreground }]}>{'>'}</Text>
-          </TouchableOpacity>
+          <Text className="text-xs text-muted mt-1">Swipe left or right to change month</Text>
         </View>
 
         {/* Calendar Legend */}
         {state.profile?.cycleTrackingEnabled && (
           <>
-            <View className="flex-row justify-center gap-4 px-4 pb-2">
-              <View className="flex-row items-center">
-                <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
-                <Text className="text-xs text-muted ml-1">Period</Text>
-              </View>
-              <View className="flex-row items-center">
-                <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
-                <Text className="text-xs text-muted ml-1">Ovulation</Text>
-              </View>
-              <View className="flex-row items-center">
-                <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
-                <Text className="text-xs text-muted ml-1">Fertile</Text>
-              </View>
-            </View>
-
-            <View style={[styles.forecastCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View className="flex-row justify-between items-start gap-3">
-                <View style={styles.forecastCopy}>
-                  <Text className="text-sm font-semibold text-foreground">Cycle forecast</Text>
-                  <Text className="text-xs text-muted mt-1">
-                    Turn on edit mode, then tap the days you had your period directly in the calendar.
-                  </Text>
+            <View className="flex-row justify-between items-center px-4 pb-2">
+              <View className="flex-row gap-4">
+                <View className="flex-row items-center">
+                  <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
+                  <Text className="text-xs text-muted ml-1">Period</Text>
                 </View>
-                <View className="items-end gap-2">
-                  <TouchableOpacity
-                    onPress={() => {
-                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                      setIsEditingPeriod((value) => !value);
-                    }}
-                    style={[
-                      styles.editModeChip,
-                      {
-                        backgroundColor: isEditingPeriod ? colors.primary : colors.background,
-                        borderColor: isEditingPeriod ? colors.primary : colors.border,
-                      },
-                    ]}
-                    activeOpacity={0.85}
-                  >
-                    <Text
-                      style={[
-                        styles.editModeChipText,
-                        { color: isEditingPeriod ? '#FFFFFF' : colors.foreground },
-                      ]}
-                    >
-                      {isEditingPeriod ? 'Done Editing' : 'Edit Period Days'}
-                    </Text>
-                  </TouchableOpacity>
-                  {forecast && (
-                    <View style={[styles.anchorBadge, { backgroundColor: `${colors.period}20`, borderColor: colors.period }]}>
-                      <Text style={[styles.anchorBadgeText, { color: colors.period }]}>
-                        Start {formatMonthDay(forecast.anchorPeriodStart)}
-                      </Text>
-                    </View>
-                  )}
+                <View className="flex-row items-center">
+                  <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
+                  <Text className="text-xs text-muted ml-1">Ovulation</Text>
+                </View>
+                <View className="flex-row items-center">
+                  <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
+                  <Text className="text-xs text-muted ml-1">Fertile</Text>
                 </View>
               </View>
 
-              {forecast ? (
-                <View className="flex-row justify-between mt-4">
-                  <View className="items-center flex-1">
-                    <Text className="text-xs text-muted">Ovulation</Text>
-                    <Text className="text-base font-semibold text-foreground mt-1">
-                      {formatMonthDay(forecast.ovulationDate)}
-                    </Text>
-                  </View>
-                  <View className="items-center flex-1">
-                    <Text className="text-xs text-muted">Fertile Window</Text>
-                    <Text className="text-base font-semibold text-foreground mt-1 text-center">
-                      {formatMonthDay(forecast.fertilityWindowStart)} - {formatMonthDay(forecast.fertilityWindowEnd)}
-                    </Text>
-                  </View>
-                  <View className="items-center flex-1">
-                    <Text className="text-xs text-muted">Next Period</Text>
-                    <Text className="text-base font-semibold text-foreground mt-1">
-                      {formatMonthDay(forecast.nextPeriodStart)}
-                    </Text>
-                  </View>
-                </View>
-              ) : (
-                <Text className="text-sm text-muted mt-3">
-                  Add a period start day to begin ovulation and fertility predictions.
+              <TouchableOpacity
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setIsEditingPeriod((value) => !value);
+                }}
+                style={[
+                  styles.editModeChip,
+                  {
+                    backgroundColor: isEditingPeriod ? colors.primary : colors.background,
+                    borderColor: isEditingPeriod ? colors.primary : colors.border,
+                  },
+                ]}
+                activeOpacity={0.85}
+              >
+                <Text
+                  style={[
+                    styles.editModeChipText,
+                    { color: isEditingPeriod ? '#FFFFFF' : colors.foreground },
+                  ]}
+                >
+                  {isEditingPeriod ? 'Done' : 'Edit'}
                 </Text>
-              )}
-
-              {__DEV__ && (
-                <View className="flex-row gap-2 mt-4">
-                  <TouchableOpacity
-                    onPress={handleSeedCycleData}
-                    style={[styles.debugButton, { backgroundColor: colors.primary }]}
-                  >
-                    <Text style={styles.debugButtonText}>Seed Test Cycle</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={handleClearCycleData}
-                    style={[styles.debugButton, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
-                  >
-                    <Text style={[styles.debugButtonText, { color: colors.foreground }]}>Clear Cycle Data</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+              </TouchableOpacity>
             </View>
           </>
         )}
@@ -494,7 +346,7 @@ export default function CalendarScreen() {
         </View>
 
         {/* Calendar Grid */}
-        <View className="flex-row flex-wrap px-2">
+        <View className="flex-row flex-wrap px-2" {...monthSwipeResponder.panHandlers}>
           {calendarData.map((item, index) => {
             const indicators = getDayIndicators(item.date);
             const isToday = item.date === todayString;
@@ -637,26 +489,6 @@ const styles = StyleSheet.create({
   gradient: {
     flex: 1,
   },
-  forecastCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
-  },
-  forecastCopy: {
-    flex: 1,
-  },
-  anchorBadge: {
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  anchorBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
   editModeChip: {
     borderRadius: 999,
     borderWidth: 1,
@@ -666,17 +498,6 @@ const styles = StyleSheet.create({
   },
   editModeChipText: {
     fontSize: 12,
-    fontWeight: '700',
-  },
-  debugButton: {
-    borderRadius: 999,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-  },
-  debugButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
     fontWeight: '700',
   },
   headerButton: {
@@ -689,20 +510,6 @@ const styles = StyleSheet.create({
   },
   settingsIcon: {
     fontSize: 24,
-  },
-  navButton: {
-    alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1,
-    justifyContent: 'center',
-    padding: 8,
-    width: 44,
-    height: 44,
-  },
-  navButtonText: {
-    fontSize: 24,
-    fontWeight: '800',
-    lineHeight: 24,
   },
   legendDot: {
     width: 10,
