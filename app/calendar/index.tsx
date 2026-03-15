@@ -21,6 +21,7 @@ export default function CalendarScreen() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [isEditingPeriod, setIsEditingPeriod] = useState(false);
 
   const planId = activePlan?.id || '';
   const { logs, upsertDailyLog, getDailyLog } = useDailyLogs(planId);
@@ -139,40 +140,79 @@ export default function CalendarScreen() {
     setSelectedDate(date);
   };
 
-  const handleMarkPeriodStart = useCallback(async (date: string) => {
-    if (!state.profile?.cycleTrackingEnabled) return;
+  const isLoggedPeriodDay = useCallback((log?: DailyLog) => {
+    return !!(log?.periodStarted || log?.periodEnded || log?.flowLevel);
+  }, []);
 
+  const buildEmptyLog = useCallback((date: string): DailyLog => ({
+    id: generateId(),
+    planId,
+    date,
+    migraineOccurred: false,
+    migraineIntensity: 5,
+    symptoms: [],
+    mood: null,
+    sleepQuality: null,
+    stressLevel: null,
+    notes: '',
+    periodStarted: false,
+    periodEnded: false,
+    flowLevel: null,
+  }), [planId]);
+
+  const syncPeriodDates = useCallback(async (periodDates: string[]) => {
+    const sortedDates = [...new Set(periodDates)].sort();
+    const logsByDate = new Map(logs.map((log) => [log.date, log]));
+    const writes: DailyLog[] = [];
+
+    sortedDates.forEach((date, index) => {
+      const previousDate = sortedDates[index - 1];
+      const nextDate = sortedDates[index + 1];
+      const hasPreviousAdjacent =
+        !!previousDate &&
+        new Date(date).getTime() - new Date(previousDate).getTime() === 1000 * 60 * 60 * 24;
+      const hasNextAdjacent =
+        !!nextDate &&
+        new Date(nextDate).getTime() - new Date(date).getTime() === 1000 * 60 * 60 * 24;
+      const existingLog = logsByDate.get(date);
+
+      writes.push({
+        ...(existingLog ?? buildEmptyLog(date)),
+        flowLevel: existingLog?.flowLevel ?? 'medium',
+        periodStarted: !hasPreviousAdjacent,
+        periodEnded: !hasNextAdjacent,
+      });
+    });
+
+    logs.forEach((log) => {
+      if (!isLoggedPeriodDay(log)) return;
+      if (sortedDates.includes(log.date)) return;
+      writes.push({
+        ...log,
+        periodStarted: false,
+        periodEnded: false,
+        flowLevel: null,
+      });
+    });
+
+    await Promise.all(writes.map((log) => upsertDailyLog(log)));
+  }, [buildEmptyLog, isLoggedPeriodDay, logs, upsertDailyLog]);
+
+  const togglePeriodDate = useCallback(async (date: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
-    const existingLog = getDailyLog(planId, date);
-    const nextLog: DailyLog = existingLog
-      ? {
-          ...existingLog,
-          periodStarted: true,
-          periodEnded: false,
-          flowLevel: existingLog.flowLevel ?? 'medium',
-        }
-      : {
-          id: generateId(),
-          planId,
-          date,
-          migraineOccurred: false,
-          migraineIntensity: 5,
-          symptoms: [],
-          mood: null,
-          sleepQuality: null,
-          stressLevel: null,
-          notes: '',
-          periodStarted: true,
-          periodEnded: false,
-          flowLevel: 'medium',
-        };
+    const periodDates = logs
+      .filter((log) => isLoggedPeriodDay(log))
+      .map((log) => log.date);
+    const nextDates = periodDates.includes(date)
+      ? periodDates.filter((value) => value !== date)
+      : [...periodDates, date];
 
-    await upsertDailyLog(nextLog);
-  }, [getDailyLog, planId, state.profile?.cycleTrackingEnabled, upsertDailyLog]);
+    await syncPeriodDates(nextDates);
+  }, [isLoggedPeriodDay, logs, syncPeriodDates]);
 
   const upsertCycleFields = useCallback(async (date: string, fields: Partial<DailyLog>) => {
     const existingLog = getDailyLog(planId, date);
@@ -352,16 +392,41 @@ export default function CalendarScreen() {
                 <View style={styles.forecastCopy}>
                   <Text className="text-sm font-semibold text-foreground">Cycle forecast</Text>
                   <Text className="text-xs text-muted mt-1">
-                    Long press a day in the calendar to mark a period start and refresh predictions.
+                    Turn on edit mode, then tap the days you had your period directly in the calendar.
                   </Text>
                 </View>
-                {forecast && (
-                  <View style={[styles.anchorBadge, { backgroundColor: `${colors.period}20`, borderColor: colors.period }]}>
-                    <Text style={[styles.anchorBadgeText, { color: colors.period }]}>
-                      Start {formatMonthDay(forecast.anchorPeriodStart)}
+                <View className="items-end gap-2">
+                  <TouchableOpacity
+                    onPress={() => {
+                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                      setIsEditingPeriod((value) => !value);
+                    }}
+                    style={[
+                      styles.editModeChip,
+                      {
+                        backgroundColor: isEditingPeriod ? colors.primary : colors.background,
+                        borderColor: isEditingPeriod ? colors.primary : colors.border,
+                      },
+                    ]}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={[
+                        styles.editModeChipText,
+                        { color: isEditingPeriod ? '#FFFFFF' : colors.foreground },
+                      ]}
+                    >
+                      {isEditingPeriod ? 'Done Editing' : 'Edit Period Days'}
                     </Text>
-                  </View>
-                )}
+                  </TouchableOpacity>
+                  {forecast && (
+                    <View style={[styles.anchorBadge, { backgroundColor: `${colors.period}20`, borderColor: colors.period }]}>
+                      <Text style={[styles.anchorBadgeText, { color: colors.period }]}>
+                        Start {formatMonthDay(forecast.anchorPeriodStart)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
 
               {forecast ? (
@@ -442,8 +507,14 @@ export default function CalendarScreen() {
             return (
               <TouchableOpacity
                 key={`${item.date}-${index}`}
-                onPress={() => item.isCurrentMonth && handleDayPress(item.date)}
-                onLongPress={() => item.isCurrentMonth && handleMarkPeriodStart(item.date)}
+                onPress={() => {
+                  if (!item.isCurrentMonth) return;
+                  if (isEditingPeriod) {
+                    void togglePeriodDate(item.date);
+                    return;
+                  }
+                  handleDayPress(item.date);
+                }}
                 style={[
                   styles.dayCell,
                   { backgroundColor: bgColor },
@@ -452,7 +523,18 @@ export default function CalendarScreen() {
                 ]}
                 activeOpacity={0.7}
                 disabled={!item.isCurrentMonth}
-              >
+                >
+                {item.isCurrentMonth && state.profile?.cycleTrackingEnabled && isEditingPeriod && (
+                  <View
+                    style={[
+                      styles.periodCheckbox,
+                      {
+                        backgroundColor: indicators.isPeriodLogged ? colors.period : 'transparent',
+                        borderColor: indicators.isPeriodLogged ? colors.period : colors.muted,
+                      },
+                    ]}
+                  />
+                )}
                 <Text
                   style={[
                     styles.dayText,
@@ -567,6 +649,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  editModeChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  editModeChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   debugButton: {
     borderRadius: 999,
     minHeight: 40,
@@ -616,6 +709,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
     position: 'relative',
+  },
+  periodCheckbox: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1.5,
   },
   dayText: {
     fontSize: 16,
