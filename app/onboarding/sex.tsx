@@ -38,6 +38,7 @@ export default function SexScreen() {
     await updateProfile({ sex: selectedSex });
     router.push('/onboarding/cycle');
   };
+  const canContinue = !!selectedSex;
 
   return (
     <LinearGradient
@@ -85,14 +86,17 @@ export default function SexScreen() {
         <View>
           <TouchableOpacity
             onPress={handleNext}
-            disabled={!selectedSex}
+            disabled={!canContinue}
             style={[
               styles.button,
-              { backgroundColor: selectedSex ? colors.primary : colors.border }
+              {
+                backgroundColor: canContinue ? colors.primary : `${colors.primary}55`,
+                opacity: canContinue ? 1 : 0.7,
+              }
             ]}
             activeOpacity={0.8}
           >
-            <Text style={[styles.buttonText, { opacity: selectedSex ? 1 : 0.5 }]}>
+            <Text style={[styles.buttonText, { opacity: canContinue ? 1 : 0.75 }]}>
               Continue
             </Text>
           </TouchableOpacity>

@@ -279,10 +279,14 @@ export default function AppointmentModal({ visible, planId, date, onClose, onSav
                 disabled={!title.trim()}
                 style={[
                   styles.button,
-                  { backgroundColor: title.trim() ? colors.primary : colors.border, flex: 1 },
+                  {
+                    backgroundColor: title.trim() ? colors.primary : `${colors.primary}55`,
+                    flex: 1,
+                    opacity: title.trim() ? 1 : 0.7,
+                  },
                 ]}
               >
-                <Text style={[styles.buttonText, { color: '#FFFFFF', opacity: title.trim() ? 1 : 0.5 }]}>
+                <Text style={[styles.buttonText, { color: '#FFFFFF', opacity: title.trim() ? 1 : 0.75 }]}>
                   Save
                 </Text>
               </TouchableOpacity>

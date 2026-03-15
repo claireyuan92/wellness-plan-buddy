@@ -38,7 +38,7 @@ const initialState: AppState = {
 type Action =
   | { type: 'LOAD_STATE'; payload: Partial<AppState> }
   | { type: 'SET_PROFILE'; payload: UserProfile }
-  | { type: 'UPDATE_PROFILE'; payload: Partial<UserProfile> }
+  | { type: 'UPDATE_PROFILE'; payload: UserProfile }
   | { type: 'ADD_PLAN'; payload: TreatmentPlan }
   | { type: 'UPDATE_PLAN'; payload: TreatmentPlan }
   | { type: 'DELETE_PLAN'; payload: string }
@@ -64,7 +64,7 @@ function appReducer(state: AppState, action: Action): AppState {
     case 'UPDATE_PROFILE':
       return {
         ...state,
-        profile: state.profile ? { ...state.profile, ...action.payload } : null,
+        profile: action.payload,
       };
 
     case 'ADD_PLAN':
@@ -255,7 +255,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const newProfile = state.profile
         ? { ...state.profile, ...updates }
         : { ...DEFAULT_PROFILE, ...updates };
-      dispatch({ type: 'UPDATE_PROFILE', payload: updates });
+      dispatch({ type: 'UPDATE_PROFILE', payload: newProfile });
       await AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(newProfile));
     },
     [state.profile]

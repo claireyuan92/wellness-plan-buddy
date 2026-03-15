@@ -174,6 +174,86 @@ export default function CalendarScreen() {
     await upsertDailyLog(nextLog);
   }, [getDailyLog, planId, state.profile?.cycleTrackingEnabled, upsertDailyLog]);
 
+  const upsertCycleFields = useCallback(async (date: string, fields: Partial<DailyLog>) => {
+    const existingLog = getDailyLog(planId, date);
+    const nextLog: DailyLog = existingLog
+      ? { ...existingLog, ...fields }
+      : {
+          id: generateId(),
+          planId,
+          date,
+          migraineOccurred: false,
+          migraineIntensity: 5,
+          symptoms: [],
+          mood: null,
+          sleepQuality: null,
+          stressLevel: null,
+          notes: '',
+          periodStarted: false,
+          periodEnded: false,
+          flowLevel: null,
+          ...fields,
+        };
+
+    await upsertDailyLog(nextLog);
+  }, [getDailyLog, planId, upsertDailyLog]);
+
+  const handleClearCycleData = useCallback(async () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    for (const log of logs) {
+      if (!log.periodStarted && !log.periodEnded && !log.flowLevel) continue;
+      await upsertDailyLog({
+        ...log,
+        periodStarted: false,
+        periodEnded: false,
+        flowLevel: null,
+      });
+    }
+  }, [logs, upsertDailyLog]);
+
+  const handleSeedCycleData = useCallback(async () => {
+    const offsetDate = (days: number) => {
+      const value = new Date();
+      value.setDate(value.getDate() + days);
+      return value.toISOString().split('T')[0];
+    };
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    await handleClearCycleData();
+    await upsertCycleFields(offsetDate(-42), {
+      periodStarted: true,
+      periodEnded: false,
+      flowLevel: 'medium',
+      notes: 'Debug seed: previous period start',
+    });
+    await upsertCycleFields(offsetDate(-41), {
+      periodStarted: false,
+      periodEnded: false,
+      flowLevel: 'heavy',
+    });
+    await upsertCycleFields(offsetDate(-38), {
+      periodStarted: false,
+      periodEnded: true,
+      flowLevel: 'light',
+    });
+    await upsertCycleFields(offsetDate(-14), {
+      periodStarted: true,
+      periodEnded: false,
+      flowLevel: 'medium',
+      notes: 'Debug seed: current period start',
+    });
+    await upsertCycleFields(offsetDate(-13), {
+      periodStarted: false,
+      periodEnded: false,
+      flowLevel: 'heavy',
+    });
+    await upsertCycleFields(offsetDate(-10), {
+      periodStarted: false,
+      periodEnded: true,
+      flowLevel: 'light',
+    });
+  }, [handleClearCycleData, upsertCycleFields]);
+
   const handleBackToPlans = async () => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -309,6 +389,23 @@ export default function CalendarScreen() {
                 <Text className="text-sm text-muted mt-3">
                   Add a period start day to begin ovulation and fertility predictions.
                 </Text>
+              )}
+
+              {__DEV__ && (
+                <View className="flex-row gap-2 mt-4">
+                  <TouchableOpacity
+                    onPress={handleSeedCycleData}
+                    style={[styles.debugButton, { backgroundColor: colors.primary }]}
+                  >
+                    <Text style={styles.debugButtonText}>Seed Test Cycle</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleClearCycleData}
+                    style={[styles.debugButton, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+                  >
+                    <Text style={[styles.debugButtonText, { color: colors.foreground }]}>Clear Cycle Data</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           </>
@@ -468,6 +565,17 @@ const styles = StyleSheet.create({
   },
   anchorBadgeText: {
     fontSize: 12,
+    fontWeight: '700',
+  },
+  debugButton: {
+    borderRadius: 999,
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  debugButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '700',
   },
   headerButton: {

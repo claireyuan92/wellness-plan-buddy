@@ -273,10 +273,14 @@ export default function PlansScreen() {
                     disabled={!newPlan.name.trim()}
                     style={[
                       styles.modalButton,
-                      { backgroundColor: newPlan.name.trim() ? colors.primary : colors.border, flex: 1 },
+                      {
+                        backgroundColor: newPlan.name.trim() ? colors.primary : `${colors.primary}55`,
+                        flex: 1,
+                        opacity: newPlan.name.trim() ? 1 : 0.7,
+                      },
                     ]}
                   >
-                    <Text style={[styles.modalButtonText, { color: '#FFFFFF', opacity: newPlan.name.trim() ? 1 : 0.5 }]}>
+                    <Text style={[styles.modalButtonText, { color: '#FFFFFF', opacity: newPlan.name.trim() ? 1 : 0.75 }]}>
                       Create Plan
                     </Text>
                   </TouchableOpacity>

@@ -30,6 +30,7 @@ export default function AgeScreen() {
     const ageNum = parseInt(age, 10);
     return !isNaN(ageNum) && ageNum >= 13 && ageNum <= 120;
   };
+  const canContinue = isValid();
 
   return (
     <LinearGradient
@@ -72,14 +73,17 @@ export default function AgeScreen() {
           <View className="px-8 pb-8">
             <TouchableOpacity
               onPress={handleNext}
-              disabled={!isValid()}
+              disabled={!canContinue}
               style={[
                 styles.button,
-                { backgroundColor: isValid() ? colors.primary : colors.border }
+                {
+                  backgroundColor: canContinue ? colors.primary : `${colors.primary}55`,
+                  opacity: canContinue ? 1 : 0.7,
+                }
               ]}
               activeOpacity={0.8}
             >
-              <Text style={[styles.buttonText, { opacity: isValid() ? 1 : 0.5 }]}>
+              <Text style={[styles.buttonText, { opacity: canContinue ? 1 : 0.75 }]}>
                 Continue
               </Text>
             </TouchableOpacity>

@@ -221,6 +221,56 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >
+            {state.profile?.cycleTrackingEnabled && (
+              <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text className="text-lg font-semibold text-foreground mb-3">Quick Cycle Log</Text>
+                <Text className="text-sm text-muted mb-4">
+                  Tap once to log this day as a period start or end.
+                </Text>
+                <View className="flex-row gap-3">
+                  <TouchableOpacity
+                    onPress={() => handleCycleToggle('periodStarted', !log.periodStarted)}
+                    style={[
+                      styles.quickActionButton,
+                      {
+                        backgroundColor: log.periodStarted ? colors.period : colors.background,
+                        borderColor: log.periodStarted ? colors.period : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.quickActionButtonText,
+                        { color: log.periodStarted ? '#FFFFFF' : colors.foreground },
+                      ]}
+                    >
+                      {log.periodStarted ? 'Period Start Logged' : 'Log Period Start'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => handleCycleToggle('periodEnded', !log.periodEnded)}
+                    style={[
+                      styles.quickActionButton,
+                      {
+                        backgroundColor: log.periodEnded ? colors.primary : colors.background,
+                        borderColor: log.periodEnded ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.quickActionButtonText,
+                        { color: log.periodEnded ? '#FFFFFF' : colors.foreground },
+                      ]}
+                    >
+                      {log.periodEnded ? 'Period End Logged' : 'Log Period End'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
             {/* Symptoms & Wellness Section */}
             <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text className="text-lg font-semibold text-foreground mb-4">Symptoms & Wellness</Text>
@@ -649,6 +699,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     marginBottom: 16,
+  },
+  quickActionButton: {
+    flex: 1,
+    minHeight: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+  },
+  quickActionButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   sectionEmoji: {
     fontSize: 20,

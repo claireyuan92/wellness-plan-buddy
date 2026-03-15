@@ -242,10 +242,14 @@ export default function MedicationModal({ visible, planId, onClose, onSave }: Me
                 disabled={!name.trim()}
                 style={[
                   styles.button,
-                  { backgroundColor: name.trim() ? colors.primary : colors.border, flex: 1 },
+                  {
+                    backgroundColor: name.trim() ? colors.primary : `${colors.primary}55`,
+                    flex: 1,
+                    opacity: name.trim() ? 1 : 0.7,
+                  },
                 ]}
               >
-                <Text style={[styles.buttonText, { color: '#FFFFFF', opacity: name.trim() ? 1 : 0.5 }]}>
+                <Text style={[styles.buttonText, { color: '#FFFFFF', opacity: name.trim() ? 1 : 0.75 }]}>
                   Save
                 </Text>
               </TouchableOpacity>
