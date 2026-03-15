@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, TextInput, Switch, Platform, LayoutAnimation, UIManager } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Platform, LayoutAnimation, UIManager } from 'react-native';
 import { useColors } from '@/hooks/use-colors';
 import { useAppStore, useDailyLogs, useMedications, useAppointments } from '@/lib/store/app-store';
-import { DailyLog, generateId, MIGRAINE_SYMPTOMS, MigraineSymptom, Mood, FlowLevel, Medication, Appointment } from '@/lib/types';
+import { DailyLog, generateId, Medication, Appointment, MedicationStatus } from '@/lib/types';
 import { getDateFertilityInfoFromLogs, getUpcomingFertilityForecast } from '@/lib/utils/fertility';
 import * as Haptics from 'expo-haptics';
 import MedicationModal from './medication-modal';
@@ -15,30 +15,11 @@ interface DayDetailSheetProps {
   onClose: () => void;
 }
 
-const MOOD_OPTIONS: { value: Mood; emoji: string; label: string }[] = [
-  { value: 'great', emoji: '😄', label: 'Great' },
-  { value: 'good', emoji: '🙂', label: 'Good' },
-  { value: 'okay', emoji: '😐', label: 'Okay' },
-  { value: 'bad', emoji: '😔', label: 'Bad' },
-  { value: 'terrible', emoji: '😢', label: 'Terrible' },
-];
-
-const FLOW_OPTIONS: { value: FlowLevel; label: string }[] = [
-  { value: 'light', label: 'Light' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'heavy', label: 'Heavy' },
-];
-
-const SYMPTOM_LABELS: Record<MigraineSymptom, string> = {
-  nausea: 'Nausea',
-  aura: 'Aura',
-  light_sensitivity: 'Light Sensitivity',
-  sound_sensitivity: 'Sound Sensitivity',
-  dizziness: 'Dizziness',
-  neck_pain: 'Neck Pain',
-  fatigue: 'Fatigue',
-  other: 'Other',
-};
+const MIGRAINE_LEVELS = [
+  { value: 3, label: 'Mild' },
+  { value: 6, label: 'Moderate' },
+  { value: 9, label: 'Severe' },
+] as const;
 
 export default function DayDetailSheet({ visible, date, planId, onClose }: DayDetailSheetProps) {
   const colors = useColors();
@@ -119,7 +100,14 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
   }, [date, logs, state.profile]);
 
   // Get medications and appointments for this date
-  const dayMedications = medications;
+  const supplements = useMemo(
+    () => medications.filter((medication) => medication.type === 'supplement'),
+    [medications]
+  );
+  const medicationsOnly = useMemo(
+    () => medications.filter((medication) => medication.type !== 'supplement'),
+    [medications]
+  );
   const dayAppointments = useMemo(() => getAppointmentsForDate(planId, date), [planId, date, getAppointmentsForDate]);
 
   const handleSave = async () => {
@@ -135,40 +123,11 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
     });
   };
 
-  const handleCycleToggle = (field: 'periodStarted' | 'periodEnded', value: boolean) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-
-    if (field === 'periodStarted') {
-      handleFieldChange('periodStarted', value);
-      if (value) {
-        handleFieldChange('periodEnded', false);
-        if (!log.flowLevel) {
-          handleFieldChange('flowLevel', 'medium');
-        }
-      }
-      return;
-    }
-
-    handleFieldChange('periodEnded', value);
-    if (value) {
-      handleFieldChange('periodStarted', false);
-    }
-  };
-
-  const handleSymptomToggle = (symptom: MigraineSymptom) => {
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    const newSymptoms = log.symptoms.includes(symptom)
-      ? log.symptoms.filter(s => s !== symptom)
-      : [...log.symptoms, symptom];
-    handleFieldChange('symptoms', newSymptoms);
-  };
-
-  const handleMedicationStatus = async (medicationId: string, status: 'taken' | 'skipped') => {
+  const handleMedicationStatus = async (
+    medicationId: string,
+    scheduledTime: string | null,
+    status: MedicationStatus
+  ) => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
@@ -176,6 +135,7 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
       id: generateId(),
       medicationId,
       date,
+      scheduledTime,
       status,
       actualTime: status === 'taken' ? new Date().toISOString() : null,
     });
@@ -190,8 +150,83 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
     const d = new Date(timeStr);
     return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   };
+  const formatScheduleTime = (value: string) => {
+    const [hours, minutes] = value.split(':').map(Number);
+    const dateValue = new Date();
+    dateValue.setHours(hours, minutes, 0, 0);
+    return dateValue.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  };
   const formatShortDate = (value: string) =>
     new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const renderMedicationSection = (title: string, items: Medication[], emptyMessage: string) => (
+    <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View className="flex-row justify-between items-center mb-4">
+        <Text className="text-lg font-semibold text-foreground">{title}</Text>
+        <TouchableOpacity
+          onPress={() => {
+            if (Platform.OS !== 'web') {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }
+            setShowMedicationModal(true);
+          }}
+          style={[styles.addButton, { backgroundColor: colors.primary }]}
+        >
+          <Text style={styles.addButtonText}>+ Add</Text>
+        </TouchableOpacity>
+      </View>
+
+      {items.length === 0 ? (
+        <Text className="text-sm text-muted text-center py-4">{emptyMessage}</Text>
+      ) : (
+        items.flatMap((med) => {
+          const doseTimes = med.scheduleTimes.length > 0 ? med.scheduleTimes : [null];
+          return doseTimes.map((scheduledTime) => {
+            const medLog = getMedicationLog(med.id, date, scheduledTime);
+            return (
+              <View
+                key={`${med.id}-${scheduledTime ?? 'as-needed'}`}
+                style={[styles.medCard, { backgroundColor: colors.background, borderColor: colors.border }]}
+              >
+                <View className="flex-1">
+                  <Text className="text-base font-medium text-foreground">{med.name}</Text>
+                  <Text className="text-sm text-muted">{med.dosage}</Text>
+                  <Text className="text-xs text-muted">
+                    {scheduledTime ? formatScheduleTime(scheduledTime) : 'As needed'}
+                  </Text>
+                </View>
+                <View className="flex-row gap-2">
+                  <TouchableOpacity
+                    onPress={() => handleMedicationStatus(med.id, scheduledTime, 'taken')}
+                    style={[
+                      styles.statusButton,
+                      {
+                        backgroundColor: medLog?.status === 'taken' ? colors.success : colors.background,
+                        borderColor: medLog?.status === 'taken' ? colors.success : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: medLog?.status === 'taken' ? '#FFFFFF' : colors.foreground }}>✓</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleMedicationStatus(med.id, scheduledTime, 'skipped')}
+                    style={[
+                      styles.statusButton,
+                      {
+                        backgroundColor: medLog?.status === 'skipped' ? colors.error : colors.background,
+                        borderColor: medLog?.status === 'skipped' ? colors.error : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: medLog?.status === 'skipped' ? '#FFFFFF' : colors.foreground }}>✗</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          });
+        })
+      )}
+    </View>
+  );
 
   if (!visible) return null;
 
@@ -221,235 +256,67 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >
-            {/* Symptoms & Wellness Section */}
+            {renderMedicationSection('Supplements', supplements, 'No supplements scheduled.')}
+
+            {renderMedicationSection('Medication', medicationsOnly, 'No medication scheduled.')}
+
+            {/* Migraine Status */}
             <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text className="text-lg font-semibold text-foreground mb-4">Symptoms & Wellness</Text>
-
-              {/* Migraine Toggle */}
-              <View className="flex-row justify-between items-center mb-4">
-                <View className="flex-row items-center">
-                  <Text style={styles.sectionEmoji}>🤕</Text>
-                  <Text className="text-base text-foreground ml-2">Migraine</Text>
-                </View>
-                <Switch
-                  value={log.migraineOccurred}
-                  onValueChange={(value) => {
-                    if (Platform.OS !== 'web') {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    }
-                    handleFieldChange('migraineOccurred', value);
-                  }}
-                  trackColor={{ false: colors.border, true: colors.migraine }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-
-              {/* Migraine Intensity */}
-              {log.migraineOccurred && (
-                <View className="mb-4">
-                  <Text className="text-sm text-muted mb-2">Intensity: {log.migraineIntensity}/10</Text>
-                  <View className="flex-row gap-1">
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                      <TouchableOpacity
-                        key={num}
-                        onPress={() => handleFieldChange('migraineIntensity', num)}
-                        style={[
-                          styles.intensityButton,
-                          {
-                            backgroundColor: num <= log.migraineIntensity ? colors.migraine : colors.border,
-                          },
-                        ]}
-                      />
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* Symptom Chips */}
-              {log.migraineOccurred && (
-                <View className="mb-4">
-                  <Text className="text-sm text-muted mb-2">Symptoms</Text>
-                  <View className="flex-row flex-wrap gap-2">
-                    {MIGRAINE_SYMPTOMS.map((symptom) => (
-                      <TouchableOpacity
-                        key={symptom}
-                        onPress={() => handleSymptomToggle(symptom)}
-                        style={[
-                          styles.chip,
-                          {
-                            backgroundColor: log.symptoms.includes(symptom) ? colors.primary : colors.background,
-                            borderColor: log.symptoms.includes(symptom) ? colors.primary : colors.border,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.chipText,
-                            { color: log.symptoms.includes(symptom) ? '#FFFFFF' : colors.foreground },
-                          ]}
-                        >
-                          {SYMPTOM_LABELS[symptom]}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {/* Mood Selector */}
-              <View className="mb-4">
-                <Text className="text-sm text-muted mb-2">Mood</Text>
-                <View className="flex-row justify-between">
-                  {MOOD_OPTIONS.map((option) => (
+              <Text className="text-lg font-semibold text-foreground mb-4">Migraine Status</Text>
+              <View className="flex-row gap-3">
+                {MIGRAINE_LEVELS.map((level) => {
+                  const isSelected = log.migraineOccurred && log.migraineIntensity === level.value;
+                  return (
                     <TouchableOpacity
-                      key={option.value}
+                      key={level.label}
                       onPress={() => {
                         if (Platform.OS !== 'web') {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                         }
-                        handleFieldChange('mood', log.mood === option.value ? null : option.value);
+                        handleFieldChange('migraineOccurred', true);
+                        handleFieldChange('migraineIntensity', level.value);
                       }}
                       style={[
-                        styles.moodButton,
+                        styles.severityButton,
                         {
-                          backgroundColor: log.mood === option.value ? colors.primary : colors.background,
-                          borderColor: log.mood === option.value ? colors.primary : colors.border,
+                          backgroundColor: isSelected ? colors.migraine : colors.background,
+                          borderColor: isSelected ? colors.migraine : colors.border,
                         },
                       ]}
                     >
-                      <Text style={styles.moodEmoji}>{option.emoji}</Text>
+                      <Text
+                        style={[
+                          styles.severityButtonText,
+                          { color: isSelected ? '#FFFFFF' : colors.foreground },
+                        ]}
+                      >
+                        {level.label}
+                      </Text>
                     </TouchableOpacity>
-                  ))}
-                </View>
+                  );
+                })}
               </View>
-
-              {/* Sleep Quality */}
-              <View className="mb-4">
-                <Text className="text-sm text-muted mb-2">
-                  Sleep Quality: {log.sleepQuality !== null ? `${log.sleepQuality}/10` : 'Not logged'}
+              <TouchableOpacity
+                onPress={() => {
+                  if (Platform.OS !== 'web') {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }
+                  handleFieldChange('migraineOccurred', false);
+                }}
+                style={[
+                  styles.clearStatusButton,
+                  { backgroundColor: !log.migraineOccurred ? colors.primary : colors.background, borderColor: !log.migraineOccurred ? colors.primary : colors.border },
+                ]}
+              >
+                <Text style={[styles.clearStatusButtonText, { color: !log.migraineOccurred ? '#FFFFFF' : colors.foreground }]}>
+                  No Migraine Today
                 </Text>
-                <View className="flex-row gap-1">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                    <TouchableOpacity
-                      key={num}
-                      onPress={() => handleFieldChange('sleepQuality', num)}
-                      style={[
-                        styles.intensityButton,
-                        {
-                          backgroundColor: log.sleepQuality !== null && num <= log.sleepQuality ? colors.success : colors.border,
-                        },
-                      ]}
-                    />
-                  ))}
-                </View>
-              </View>
-
-              {/* Stress Level */}
-              <View className="mb-4">
-                <Text className="text-sm text-muted mb-2">
-                  Stress Level: {log.stressLevel !== null ? `${log.stressLevel}/10` : 'Not logged'}
-                </Text>
-                <View className="flex-row gap-1">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                    <TouchableOpacity
-                      key={num}
-                      onPress={() => handleFieldChange('stressLevel', num)}
-                      style={[
-                        styles.intensityButton,
-                        {
-                          backgroundColor: log.stressLevel !== null && num <= log.stressLevel ? colors.warning : colors.border,
-                        },
-                      ]}
-                    />
-                  ))}
-                </View>
-              </View>
-
-              {/* Notes */}
-              <View>
-                <Text className="text-sm text-muted mb-2">Notes</Text>
-                <TextInput
-                  style={[styles.notesInput, { backgroundColor: colors.background, color: colors.foreground, borderColor: colors.border }]}
-                  value={log.notes}
-                  onChangeText={(text) => handleFieldChange('notes', text)}
-                  placeholder="Add notes..."
-                  placeholderTextColor={colors.muted}
-                  multiline
-                  numberOfLines={3}
-                />
-              </View>
+              </TouchableOpacity>
             </View>
 
-            {/* Cycle & Fertility Section */}
+            {/* Cycle Summary */}
             {state.profile?.cycleTrackingEnabled && (
               <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text className="text-lg font-semibold text-foreground mb-4">Cycle & Fertility</Text>
-
-                {/* Period Toggle */}
-                <View className="flex-row justify-between items-center mb-4">
-                  <View className="flex-row items-center">
-                    <Text style={styles.sectionEmoji}>🩸</Text>
-                    <Text className="text-base text-foreground ml-2">Period Started</Text>
-                  </View>
-                  <Switch
-                    value={log.periodStarted}
-                    onValueChange={(value) => handleCycleToggle('periodStarted', value)}
-                    trackColor={{ false: colors.border, true: colors.period }}
-                    thumbColor="#FFFFFF"
-                  />
-                </View>
-
-                {/* Period End Toggle */}
-                <View className="flex-row justify-between items-center mb-4">
-                  <View className="flex-row items-center">
-                    <Text style={styles.sectionEmoji}>✓</Text>
-                    <Text className="text-base text-foreground ml-2">Period Ended</Text>
-                  </View>
-                  <Switch
-                    value={log.periodEnded}
-                    onValueChange={(value) => handleCycleToggle('periodEnded', value)}
-                    trackColor={{ false: colors.border, true: colors.period }}
-                    thumbColor="#FFFFFF"
-                  />
-                </View>
-
-                {/* Flow Level */}
-                {(log.periodStarted || log.flowLevel) && (
-                  <View className="mb-4">
-                    <Text className="text-sm text-muted mb-2">Flow Level</Text>
-                    <View className="flex-row gap-2">
-                      {FLOW_OPTIONS.map((option) => (
-                        <TouchableOpacity
-                          key={option.value}
-                          onPress={() => {
-                            if (Platform.OS !== 'web') {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                            }
-                            handleFieldChange('flowLevel', log.flowLevel === option.value ? null : option.value);
-                          }}
-                          style={[
-                            styles.flowButton,
-                            {
-                              backgroundColor: log.flowLevel === option.value ? colors.period : colors.background,
-                              borderColor: log.flowLevel === option.value ? colors.period : colors.border,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.flowText,
-                              { color: log.flowLevel === option.value ? '#FFFFFF' : colors.foreground },
-                            ]}
-                          >
-                            {option.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                )}
-
-                {/* Fertility Info */}
                 {(fertilityInfo || fertilityForecast) && (
                   <View style={[styles.fertilityInfo, { backgroundColor: colors.background, borderColor: colors.border }]}>
                     <Text className="text-sm font-medium text-foreground mb-1">
@@ -482,71 +349,6 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
                 )}
               </View>
             )}
-
-            {/* Medications & Supplements Section */}
-            <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View className="flex-row justify-between items-center mb-4">
-                <Text className="text-lg font-semibold text-foreground">Medications & Supplements</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    if (Platform.OS !== 'web') {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    }
-                    setShowMedicationModal(true);
-                  }}
-                  style={[styles.addButton, { backgroundColor: colors.primary }]}
-                >
-                  <Text style={styles.addButtonText}>+ Add</Text>
-                </TouchableOpacity>
-              </View>
-
-              {dayMedications.length === 0 ? (
-                <Text className="text-sm text-muted text-center py-4">
-                  No medications scheduled. Tap + Add to create one.
-                </Text>
-              ) : (
-                dayMedications.map((med) => {
-                  const medLog = getMedicationLog(med.id, date);
-                  return (
-                    <View key={med.id} style={[styles.medCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                      <View className="flex-1">
-                        <Text className="text-base font-medium text-foreground">{med.name}</Text>
-                        <Text className="text-sm text-muted">{med.dosage}</Text>
-                        {med.scheduleTimes.length > 0 && (
-                          <Text className="text-xs text-muted">{med.scheduleTimes.join(', ')}</Text>
-                        )}
-                      </View>
-                      <View className="flex-row gap-2">
-                        <TouchableOpacity
-                          onPress={() => handleMedicationStatus(med.id, 'taken')}
-                          style={[
-                            styles.statusButton,
-                            {
-                              backgroundColor: medLog?.status === 'taken' ? colors.success : colors.background,
-                              borderColor: medLog?.status === 'taken' ? colors.success : colors.border,
-                            },
-                          ]}
-                        >
-                          <Text style={{ color: medLog?.status === 'taken' ? '#FFFFFF' : colors.foreground }}>✓</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => handleMedicationStatus(med.id, 'skipped')}
-                          style={[
-                            styles.statusButton,
-                            {
-                              backgroundColor: medLog?.status === 'skipped' ? colors.error : colors.background,
-                              borderColor: medLog?.status === 'skipped' ? colors.error : colors.border,
-                            },
-                          ]}
-                        >
-                          <Text style={{ color: medLog?.status === 'skipped' ? '#FFFFFF' : colors.foreground }}>✗</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
 
             {/* Appointments Section */}
             <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -738,6 +540,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
+  },
+  severityButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+  },
+  severityButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  clearStatusButton: {
+    marginTop: 12,
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    paddingHorizontal: 16,
+  },
+  clearStatusButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   aptCard: {
     flexDirection: 'row',

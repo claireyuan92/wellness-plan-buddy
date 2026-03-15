@@ -127,7 +127,8 @@ function appReducer(state: AppState, action: Action): AppState {
       const existingIndex = state.medicationLogs.findIndex(
         (log) =>
           log.medicationId === action.payload.medicationId &&
-          log.date === action.payload.date
+          log.date === action.payload.date &&
+          (log.scheduledTime ?? null) === (action.payload.scheduledTime ?? null)
       );
       if (existingIndex >= 0) {
         const newLogs = [...state.medicationLogs];
@@ -184,7 +185,11 @@ interface AppContextType {
   getMedicationsForPlan: (planId: string) => Medication[];
   // Medication log actions
   upsertMedicationLog: (log: MedicationLog) => Promise<void>;
-  getMedicationLog: (medicationId: string, date: string) => MedicationLog | undefined;
+  getMedicationLog: (
+    medicationId: string,
+    date: string,
+    scheduledTime?: string | null
+  ) => MedicationLog | undefined;
   // Appointment actions
   addAppointment: (appointment: Omit<Appointment, 'id' | 'createdAt'>) => Promise<Appointment>;
   updateAppointment: (appointment: Appointment) => Promise<void>;
@@ -387,7 +392,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (log: MedicationLog) => {
       dispatch({ type: 'UPSERT_MEDICATION_LOG', payload: log });
       const existingIndex = state.medicationLogs.findIndex(
-        (l) => l.medicationId === log.medicationId && l.date === log.date
+        (l) =>
+          l.medicationId === log.medicationId &&
+          l.date === log.date &&
+          (l.scheduledTime ?? null) === (log.scheduledTime ?? null)
       );
       let newLogs: MedicationLog[];
       if (existingIndex >= 0) {
@@ -402,9 +410,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const getMedicationLog = useCallback(
-    (medicationId: string, date: string) => {
+    (medicationId: string, date: string, scheduledTime: string | null = null) => {
       return state.medicationLogs.find(
-        (log) => log.medicationId === medicationId && log.date === date
+        (log) =>
+          log.medicationId === medicationId &&
+          log.date === date &&
+          (log.scheduledTime ?? null) === scheduledTime
       );
     },
     [state.medicationLogs]

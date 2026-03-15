@@ -83,6 +83,7 @@ export interface MedicationLog {
   id: string;
   medicationId: string;
   date: string; // ISO date string (YYYY-MM-DD)
+  scheduledTime: string | null; // HH:mm for scheduled doses, null for as-needed meds
   status: MedicationStatus;
   actualTime: string | null; // ISO datetime string
 }

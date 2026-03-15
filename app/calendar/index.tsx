@@ -21,7 +21,6 @@ export default function CalendarScreen() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [isEditingPeriod, setIsEditingPeriod] = useState(false);
 
   const planId = activePlan?.id || '';
   const { logs, upsertDailyLog } = useDailyLogs(planId);
@@ -292,48 +291,23 @@ export default function CalendarScreen() {
 
         {/* Calendar Legend */}
         {state.profile?.cycleTrackingEnabled && (
-          <>
-            <View className="flex-row justify-between items-center px-4 pb-2">
-              <View className="flex-row gap-4">
-                <View className="flex-row items-center">
-                  <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
-                  <Text className="text-xs text-muted ml-1">Period</Text>
-                </View>
-                <View className="flex-row items-center">
-                  <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
-                  <Text className="text-xs text-muted ml-1">Ovulation</Text>
-                </View>
-                <View className="flex-row items-center">
-                  <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
-                  <Text className="text-xs text-muted ml-1">Fertile</Text>
-                </View>
+          <View className="flex-row justify-between items-center px-4 pb-2">
+            <View className="flex-row gap-4">
+              <View className="flex-row items-center">
+                <View style={[styles.legendDot, { backgroundColor: colors.period }]} />
+                <Text className="text-xs text-muted ml-1">Period</Text>
               </View>
-
-              <TouchableOpacity
-                onPress={() => {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setIsEditingPeriod((value) => !value);
-                }}
-                style={[
-                  styles.editModeChip,
-                  {
-                    backgroundColor: isEditingPeriod ? colors.primary : colors.background,
-                    borderColor: isEditingPeriod ? colors.primary : colors.border,
-                  },
-                ]}
-                activeOpacity={0.85}
-              >
-                <Text
-                  style={[
-                    styles.editModeChipText,
-                    { color: isEditingPeriod ? '#FFFFFF' : colors.foreground },
-                  ]}
-                >
-                  {isEditingPeriod ? 'Done' : 'Edit'}
-                </Text>
-              </TouchableOpacity>
+              <View className="flex-row items-center">
+                <View style={[styles.legendDot, { backgroundColor: colors.ovulation }]} />
+                <Text className="text-xs text-muted ml-1">Ovulation</Text>
+              </View>
+              <View className="flex-row items-center">
+                <View style={[styles.legendDot, { backgroundColor: colors.fertility }]} />
+                <Text className="text-xs text-muted ml-1">Fertile</Text>
+              </View>
             </View>
-          </>
+            <Text className="text-xs text-muted">Long press to mark period</Text>
+          </View>
         )}
 
         {/* Day Headers */}
@@ -369,11 +343,11 @@ export default function CalendarScreen() {
                 key={`${item.date}-${index}`}
                 onPress={() => {
                   if (!item.isCurrentMonth) return;
-                  if (isEditingPeriod) {
-                    void togglePeriodDate(item.date);
-                    return;
-                  }
                   handleDayPress(item.date);
+                }}
+                onLongPress={() => {
+                  if (!item.isCurrentMonth || !state.profile?.cycleTrackingEnabled) return;
+                  void togglePeriodDate(item.date);
                 }}
                 style={[
                   styles.dayCell,
@@ -384,7 +358,7 @@ export default function CalendarScreen() {
                 activeOpacity={0.7}
                 disabled={!item.isCurrentMonth}
                 >
-                {item.isCurrentMonth && state.profile?.cycleTrackingEnabled && isEditingPeriod && (
+                {item.isCurrentMonth && state.profile?.cycleTrackingEnabled && (
                   <View
                     style={[
                       styles.periodCheckbox,
@@ -488,17 +462,6 @@ const styles = StyleSheet.create({
   },
   gradient: {
     flex: 1,
-  },
-  editModeChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  editModeChipText: {
-    fontSize: 12,
-    fontWeight: '700',
   },
   headerButton: {
     padding: 8,
