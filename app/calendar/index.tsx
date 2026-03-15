@@ -358,14 +358,22 @@ export default function CalendarScreen() {
 
         {/* Month Navigation */}
         <View className="flex-row justify-between items-center px-6 py-4">
-          <TouchableOpacity onPress={handlePrevMonth} style={styles.navButton}>
-            <Text style={[styles.navButtonText, { color: colors.primary }]}>‹</Text>
+          <TouchableOpacity
+            onPress={handlePrevMonth}
+            style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.navButtonText, { color: colors.foreground }]}>{'<'}</Text>
           </TouchableOpacity>
           <Text className="text-xl font-bold text-foreground">
             {MONTHS[currentDate.getMonth()]} {currentDate.getFullYear()}
           </Text>
-          <TouchableOpacity onPress={handleNextMonth} style={styles.navButton}>
-            <Text style={[styles.navButtonText, { color: colors.primary }]}>›</Text>
+          <TouchableOpacity
+            onPress={handleNextMonth}
+            style={[styles.navButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.navButtonText, { color: colors.foreground }]}>{'>'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -683,15 +691,18 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   navButton: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
     padding: 8,
     width: 44,
     height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   navButtonText: {
-    fontSize: 32,
-    fontWeight: '300',
+    fontSize: 24,
+    fontWeight: '800',
+    lineHeight: 24,
   },
   legendDot: {
     width: 10,
