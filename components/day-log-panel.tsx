@@ -256,24 +256,26 @@ export default function DayLogPanel({ date, planId, onTogglePeriodDay }: DayLogP
 
   return (
     <View style={styles.container}>
-      <View style={styles.topMeta}>
-        <View>
-          <Text style={[styles.dateTitle, { color: colors.foreground }]}>{formatLongDate(date)}</Text>
-          <Text style={[styles.dateSubtitle, { color: colors.muted }]}>
-            {appointmentCount > 0 ? `${appointmentCount} appointment${appointmentCount === 1 ? '' : 's'} today` : 'No appointments today'}
-          </Text>
+      <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={styles.topMeta}>
+          <View>
+            <Text style={[styles.dateTitle, { color: colors.foreground }]}>{formatLongDate(date)}</Text>
+            <Text style={[styles.dateSubtitle, { color: colors.muted }]}>
+              {appointmentCount > 0 ? `${appointmentCount} appointment${appointmentCount === 1 ? '' : 's'} today` : 'No appointments today'}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      {cycleHighlights.length > 0 && (
-        <View style={styles.highlightRow}>
-          {cycleHighlights.map((item) => (
-            <View key={item.key} style={[styles.highlightCard, { backgroundColor: `${item.color}22`, borderColor: item.color }]}>
-              <Text style={[styles.highlightText, { color: colors.foreground }]}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-      )}
+        {cycleHighlights.length > 0 && (
+          <View style={styles.highlightRow}>
+            {cycleHighlights.map((item) => (
+              <View key={item.key} style={[styles.highlightCard, { backgroundColor: `${item.color}22`, borderColor: item.color }]}>
+                <Text style={[styles.highlightText, { color: colors.foreground }]}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {state.profile?.cycleTrackingEnabled && (
@@ -393,8 +395,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  summaryCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    marginHorizontal: 20,
+    marginBottom: 14,
+    paddingVertical: 8,
+  },
   topMeta: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingTop: 8,
     paddingBottom: 12,
   },
@@ -408,8 +417,8 @@ const styles = StyleSheet.create({
   },
   highlightRow: {
     gap: 10,
-    paddingHorizontal: 20,
-    paddingBottom: 14,
+    paddingHorizontal: 18,
+    paddingBottom: 16,
   },
   highlightCard: {
     borderRadius: 16,

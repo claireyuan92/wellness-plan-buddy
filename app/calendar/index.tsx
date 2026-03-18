@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Animated,
   LayoutAnimation,
   Modal,
   PanResponder,
@@ -116,7 +115,6 @@ export default function CalendarScreen() {
   const [monthAnchor, setMonthAnchor] = useState(new Date());
   const [showMonthModal, setShowMonthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const transition = useRef(new Animated.Value(0)).current;
 
   const planId = activePlan?.id ?? '';
   const { logs, upsertDailyLog } = useDailyLogs(planId);
@@ -218,41 +216,31 @@ export default function CalendarScreen() {
     };
   }, [appointments, isLoggedPeriodDay, logs, medicationLogsForPlan, state.profile]);
 
-  const animateToDate = useCallback((nextDate: string) => {
+  const selectDate = useCallback((nextDate: string) => {
     if (nextDate === selectedDate) return;
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setSelectedDate(nextDate);
+  }, [selectedDate]);
 
-    const direction = new Date(nextDate).getTime() > new Date(selectedDate).getTime() ? 1 : -1;
-    Animated.timing(transition, {
-      toValue: direction,
-      duration: 170,
-      useNativeDriver: true,
-    }).start(() => {
-      setSelectedDate(nextDate);
-      transition.setValue(-direction * 0.65);
-      Animated.spring(transition, {
-        toValue: 0,
-        damping: 18,
-        mass: 0.9,
-        stiffness: 180,
-        useNativeDriver: true,
-      }).start();
-    });
-  }, [selectedDate, transition]);
+  const changeWeek = useCallback((direction: -1 | 1) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setSelectedDate((current) => addDays(current, direction * 7));
+  }, []);
 
-  const swipeResponder = useMemo(
+  const weekSwipeResponder = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, gestureState) =>
           Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
         onPanResponderRelease: (_, gestureState) => {
           if (gestureState.dx <= -45) {
-            animateToDate(addDays(selectedDate, 1));
+            changeWeek(1);
           } else if (gestureState.dx >= 45) {
-            animateToDate(addDays(selectedDate, -1));
+            changeWeek(-1);
           }
         },
       }),
-    [animateToDate, selectedDate]
+    [changeWeek]
   );
 
   const weekDays = useMemo(() => {
@@ -270,30 +258,6 @@ export default function CalendarScreen() {
       };
     });
   }, [monthAnchor]);
-
-  const dayPanelStyle = useMemo(
-    () => ({
-      opacity: transition.interpolate({
-        inputRange: [-1, -0.3, 0, 0.3, 1],
-        outputRange: [0.2, 0.86, 1, 0.86, 0.2],
-      }),
-      transform: [
-        {
-          translateX: transition.interpolate({
-            inputRange: [-1, 0, 1],
-            outputRange: [-46, 0, 46],
-          }),
-        },
-        {
-          scale: transition.interpolate({
-            inputRange: [-1, 0, 1],
-            outputRange: [0.98, 1, 0.98],
-          }),
-        },
-      ],
-    }),
-    [transition]
-  );
 
   const handleBackToPlans = async () => {
     if (Platform.OS !== 'web') {
@@ -354,7 +318,14 @@ export default function CalendarScreen() {
           </View>
         </View>
 
-        <View style={styles.weekStrip}>
+        <View style={styles.weekStripWrap} {...weekSwipeResponder.panHandlers}>
+          <View style={styles.weekStripHeader}>
+            <Text style={[styles.weekRangeText, { color: colors.muted }]}>
+              {new Date(weekDays[0]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(weekDays[6]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </Text>
+            <Text style={[styles.weekHintText, { color: colors.muted }]}>Swipe for next week</Text>
+          </View>
+          <View style={styles.weekStrip}>
           {weekDays.map((date) => {
             const indicators = getDayIndicators(date);
             const isSelected = date === selectedDate;
@@ -373,7 +344,7 @@ export default function CalendarScreen() {
             return (
               <TouchableOpacity
                 key={date}
-                onPress={() => animateToDate(date)}
+                onPress={() => selectDate(date)}
                 style={[
                   styles.weekDayButton,
                   { backgroundColor, borderColor: isSelected || isToday ? colors.primary : colors.border },
@@ -393,15 +364,16 @@ export default function CalendarScreen() {
               </TouchableOpacity>
             );
           })}
+          </View>
         </View>
 
-        <Animated.View style={[styles.dayPanelShell, dayPanelStyle]} {...swipeResponder.panHandlers}>
+        <View style={styles.dayPanelShell}>
           <DayLogPanel
             date={selectedDate}
             planId={planId}
             onTogglePeriodDay={togglePeriodDate}
           />
-        </Animated.View>
+        </View>
 
         <Modal
           visible={showMonthModal}
@@ -470,7 +442,7 @@ export default function CalendarScreen() {
                             key={`${section.key}-${item.date}`}
                             onPress={() => {
                               if (!item.isCurrentMonth) return;
-                              animateToDate(item.date);
+                              selectDate(item.date);
                               setShowMonthModal(false);
                             }}
                             onLongPress={() => {
@@ -565,11 +537,27 @@ const styles = StyleSheet.create({
   iconText: {
     fontSize: 18,
   },
+  weekStripWrap: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  weekStripHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingBottom: 8,
+    paddingHorizontal: 4,
+  },
+  weekRangeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  weekHintText: {
+    fontSize: 11,
+  },
   weekStrip: {
     flexDirection: 'row',
     gap: 8,
-    paddingHorizontal: 12,
-    paddingBottom: 12,
   },
   weekDayButton: {
     alignItems: 'center',
