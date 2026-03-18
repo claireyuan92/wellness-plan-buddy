@@ -285,6 +285,7 @@ export default function DayDetailSheet({ visible, date, planId, onClose }: DayDe
                       ]}
                     >
                       <Text
+                        numberOfLines={1}
                         style={[
                           styles.severityButtonText,
                           { color: isSelected ? '#FFFFFF' : colors.foreground },
@@ -551,8 +552,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   severityButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
   },
   clearStatusButton: {
     marginTop: 12,

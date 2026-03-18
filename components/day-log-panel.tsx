@@ -348,7 +348,10 @@ export default function DayLogPanel({ date, planId, onTogglePeriodDay }: DayLogP
                   ]}
                   activeOpacity={0.85}
                 >
-                  <Text style={[styles.severityText, { color: isSelected ? '#FFFFFF' : colors.foreground }]}>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.severityText, { color: isSelected ? '#FFFFFF' : colors.foreground }]}
+                  >
                     {level.label}
                   </Text>
                 </TouchableOpacity>
@@ -515,8 +518,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   severityText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
+    textAlign: 'center',
   },
   clearButton: {
     alignItems: 'center',
